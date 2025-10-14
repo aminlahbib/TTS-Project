@@ -1,4 +1,6 @@
-target/
+# Ignore Rust build output and debug files
+/target/
+*.rlib
 *.pdb
-models/*.onnx
-models/*.onnx.json
+# Ignore cached model files (ONNX weights)
+models/**/*.onnx
