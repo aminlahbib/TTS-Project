@@ -34,14 +34,14 @@ pub struct AppState {
 
 // ---- Basic request/response types ----
 #[derive(Deserialize)]
-struct TtsRequest {
+pub struct TtsRequest {
     text: String,
     language: Option<String>,
     speaker: Option<i64>,
 }
 
 #[derive(Serialize)]
-struct TtsResponse {
+pub struct TtsResponse {
     audio_base64: String,
     spectrogram_base64: String,
     duration_ms: u64,
@@ -49,25 +49,26 @@ struct TtsResponse {
 }
 
 #[derive(Serialize)]
-struct VoiceInfo {
+pub struct VoiceInfo {
     key: String,
     config: String,
     speaker: Option<i64>,
 }
 
 #[derive(Deserialize)]
-struct ChatRequest {
+pub struct ChatRequest {
     message: String,
     conversation_id: Option<String>,
 }
 
 #[derive(Serialize)]
-struct ChatResponse {
+pub struct ChatResponse {
     reply: String,
     conversation_id: String,
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -79,9 +80,7 @@ fn main() -> anyhow::Result<()> {
     // Load environment variables from .env file
     dotenv::dotenv().ok();
 
-    // Create tokio runtime
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async_main())
+    async_main().await
 }
 
 async fn async_main() -> anyhow::Result<()> {
@@ -300,7 +299,6 @@ pub async fn stream_ws(
 
     ws.on_upgrade(move |mut socket| async move {
         use axum::extract::ws::Message;
-        use futures_util::{SinkExt, StreamExt};
 
         // Synthesize full audio once
         let samples = match state.tts.synthesize_blocking(&text, Some(&lang)) {
