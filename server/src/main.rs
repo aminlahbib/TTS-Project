@@ -109,34 +109,34 @@ async fn tts_endpoint(
     State(state): State<AppState>,
     Json(req): Json<TtsRequest>,
 ) -> Result<Json<TtsResponse>, (StatusCode, String)> {
-    // 1) Synthesize
-    let samples: Vec<f32> = state
+    // 1) Synthesize and get sample rate from config
+    let (samples, sample_rate) = state
         .tts
-        .synthesize_with(&req.text, req.language.as_deref(), req.speaker)
+        .synthesize_with_sample_rate(&req.text, req.language.as_deref(), req.speaker)
         .map_err(internal_err)?;
 
     // 2) Mel
-    let sample_rate = 22_050.0f32;
+    let sample_rate_f32 = sample_rate as f32;
     let frame_size = 1024usize;
     let hop_size = 256usize;
     let n_mels = 80usize;
 
     let mel =
-        tts_core::TtsManager::audio_to_mel(&samples, sample_rate, frame_size, hop_size, n_mels);
+        tts_core::TtsManager::audio_to_mel(&samples, sample_rate_f32, frame_size, hop_size, n_mels);
     let spectrogram_base64 = tts_core::TtsManager::mel_to_png_base64(&mel);
 
     // 3) WAV (base64)
-    let audio_base64 = tts_core::TtsManager::encode_wav_base64(&samples, sample_rate as u32)
+    let audio_base64 = tts_core::TtsManager::encode_wav_base64(&samples, sample_rate)
         .map_err(internal_err)?;
 
     // Calculate duration in milliseconds
-    let duration_ms = (samples.len() as f32 / sample_rate * 1000.0) as u64;
+    let duration_ms = (samples.len() as f32 / sample_rate_f32 * 1000.0) as u64;
 
     Ok(Json(TtsResponse {
         audio_base64,
         spectrogram_base64,
         duration_ms,
-        sample_rate: sample_rate as u32,
+        sample_rate,
     }))
 }
 
@@ -186,11 +186,19 @@ async fn stream_ws(
             }
         };
 
+        // Get sample rate from config for the language
+        let sample_rate = match state.tts.config_for(Some(&lang)) {
+            Ok((cfg_path, _)) => {
+                state.tts.get_sample_rate(&cfg_path)
+                    .unwrap_or(22050) as f32
+            }
+            Err(_) => 22_050.0f32, // fallback
+        };
+        
         // Stream mel frames (simple, per-chunk)
         let frame_size = 1024usize;
         let hop_size = 256usize;
         let n_mels = 80usize;
-        let sample_rate = 22_050.0f32;
 
         let mut stft = mel_spec::prelude::Spectrogram::new(frame_size, hop_size);
         let mut mel = mel_spec::prelude::MelSpectrogram::new(frame_size, sample_rate as f64, n_mels);

@@ -23,7 +23,7 @@ pub struct MapEntry {
 
 // Cached synthesizer and sample rate
 struct CachedSynth {
-    synth: PiperSpeechSynthesizer,
+    synth: Arc<Mutex<PiperSpeechSynthesizer>>,
     sample_rate: u32,
 }
 
@@ -127,48 +127,46 @@ impl TtsManager {
     fn get_or_create_synth<P: AsRef<Path>>(
         &self,
         cfg_path: P,
-    ) -> anyhow::Result<(PiperSpeechSynthesizer, u32)> {
+    ) -> anyhow::Result<(Arc<Mutex<PiperSpeechSynthesizer>>, u32)> {
         let cfg_path_str = cfg_path.as_ref().to_string_lossy().to_string();
         
         // Check cache first
         {
             let cache = self.cache.lock().unwrap();
             if let Some(cached) = cache.get(&cfg_path_str) {
-                // Clone the synthesizer (if it's Clone) or return a reference
-                // Since PiperSpeechSynthesizer might not be Clone, we need to handle this differently
-                // For now, we'll reload but cache the sample rate at least
-                // Actually, let's check if we can clone or if we need to keep the synth in the cache
+                return Ok((cached.synth.clone(), cached.sample_rate));
             }
         }
         
-        // Load sample rate from config
+        // Not in cache, load it
         let sample_rate = Self::read_sample_rate(&cfg_path)?;
-        
-        // Build synthesizer
         let model = piper_rs::from_config_path(cfg_path.as_ref())
             .map_err(|e| anyhow::anyhow!("piper load error: {e}"))?;
         let synth = PiperSpeechSynthesizer::new(model)?;
         
-        // Cache it (we'll need to handle the fact that synth might not be Clone)
-        // For now, let's cache the sample rate and reload the synth each time
-        // Actually, let's check if PiperSpeechSynthesizer is Clone or Send+Sync
-        // If not, we might need to use Arc or a different approach
+        // Cache it
+        let synth_arc = Arc::new(Mutex::new(synth));
+        let mut cache = self.cache.lock().unwrap();
+        cache.insert(cfg_path_str.clone(), CachedSynth { 
+            synth: synth_arc.clone(), 
+            sample_rate 
+        });
         
-        // Since we can't easily clone the synthesizer, let's at least cache the sample rate
-        // and reload the synth. This is still better than reading the config every time.
-        // For a proper cache, we'd need to check if PiperSpeechSynthesizer is Send+Sync
-        // and can be shared, or use a different caching strategy.
-        
-        Ok((synth, sample_rate))
+        Ok((synth_arc, sample_rate))
     }
 
     /// Build a Piper synthesizer from a config path (legacy method, now uses cache)
+    /// Note: This creates a new synthesizer each time for compatibility.
+    /// For better performance, use get_or_create_synth directly.
     pub fn build_synth<P: AsRef<Path>>(
         &self,
         cfg_path: P,
     ) -> anyhow::Result<PiperSpeechSynthesizer> {
-        let (synth, _) = self.get_or_create_synth(cfg_path)?;
-        Ok(synth)
+        // For legacy compatibility, we still create a new one
+        // but at least we cache the sample rate
+        let model = piper_rs::from_config_path(cfg_path.as_ref())
+            .map_err(|e| anyhow::anyhow!("piper load error: {e}"))?;
+        Ok(PiperSpeechSynthesizer::new(model)?)
     }
     
     /// Get sample rate for a config path (uses cache)
@@ -189,8 +187,12 @@ impl TtsManager {
             .map_err(|e| anyhow::anyhow!("piper load error: {e}"))?;
         let synth = PiperSpeechSynthesizer::new(model)?;
         
+        let synth_arc = Arc::new(Mutex::new(synth));
         let mut cache = self.cache.lock().unwrap();
-        cache.insert(cfg_path_str, CachedSynth { synth, sample_rate });
+        cache.insert(cfg_path_str, CachedSynth { 
+            synth: synth_arc, 
+            sample_rate 
+        });
         
         Ok(sample_rate)
     }
@@ -208,12 +210,15 @@ impl TtsManager {
         speaker_override: Option<i64>,
     ) -> anyhow::Result<Vec<f32>> {
         let (cfg_path, default_speaker) = self.config_for(lang_opt)?;
-        let _speaker_id = speaker_override.or(default_speaker);
+        let speaker_id = speaker_override.or(default_speaker);
 
-        // If you later need to force speaker via SSML or tokens, do it here.
-        let synth = self.build_synth(&cfg_path)?;
+        // Get or create cached synthesizer
+        let (synth_arc, _) = self.get_or_create_synth(&cfg_path)?;
+        let synth = synth_arc.lock().unwrap();
+        
+        // Pass speaker_id to synthesize_parallel (None if not specified)
         let iter: PiperSpeechStreamParallel = synth
-            .synthesize_parallel(text.to_string(), None)
+            .synthesize_parallel(text.to_string(), speaker_id)
             .map_err(|e| anyhow::anyhow!("piper synth error: {e}"))?;
 
         let mut samples: Vec<f32> = Vec::new();
@@ -224,6 +229,38 @@ impl TtsManager {
             );
         }
         Ok(samples)
+    }
+    
+    /// Synthesize with speaker and return samples along with sample rate
+    pub fn synthesize_with_sample_rate(
+        &self,
+        text: &str,
+        lang_opt: Option<&str>,
+        speaker_override: Option<i64>,
+    ) -> anyhow::Result<(Vec<f32>, u32)> {
+        let (cfg_path, default_speaker) = self.config_for(lang_opt)?;
+        let speaker_id = speaker_override.or(default_speaker);
+        
+        // Get sample rate (uses cache)
+        let sample_rate = self.get_sample_rate(&cfg_path)?;
+
+        // Get or create cached synthesizer
+        let (synth_arc, _) = self.get_or_create_synth(&cfg_path)?;
+        let synth = synth_arc.lock().unwrap();
+        
+        // Pass speaker_id to synthesize_parallel (None if not specified)
+        let iter: PiperSpeechStreamParallel = synth
+            .synthesize_parallel(text.to_string(), speaker_id)
+            .map_err(|e| anyhow::anyhow!("piper synth error: {e}"))?;
+
+        let mut samples: Vec<f32> = Vec::new();
+        for part in iter {
+            samples.extend(
+                part.map_err(|e| anyhow::anyhow!("chunk error: {e}"))?
+                    .into_vec(),
+            );
+        }
+        Ok((samples, sample_rate))
     }
 
     /// Convenience: WAV base64
