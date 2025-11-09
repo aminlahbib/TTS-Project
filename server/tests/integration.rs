@@ -1,14 +1,13 @@
-//! Integration tests for API endpoints
+//! Integration tests for the TTS project
+
+mod common;
 
 use axum::{
-    body::Body,
+    body::{Body, to_bytes},
     http::{Request, StatusCode},
-    Router,
 };
 use serde_json::json;
 use tower::ServiceExt;
-
-mod common;
 
 use common::*;
 
@@ -26,7 +25,7 @@ async fn test_health_check() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     assert_eq!(body, "ok");
 }
 
@@ -44,7 +43,7 @@ async fn test_list_voices() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let voices: Vec<String> = serde_json::from_slice(&body).unwrap();
     assert!(!voices.is_empty());
 }
@@ -63,7 +62,7 @@ async fn test_list_voices_detail() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let voices: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
     assert!(!voices.is_empty());
 }
@@ -89,7 +88,7 @@ async fn test_tts_endpoint_success() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let tts_response: serde_json::Value = serde_json::from_slice(&body).unwrap();
     
     assert!(tts_response["audio_base64"].is_string());
@@ -119,7 +118,7 @@ async fn test_tts_endpoint_validation_empty_text() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(error["error"].is_string());
 }
@@ -194,7 +193,7 @@ async fn test_chat_endpoint_success() {
     let status = response.status();
     assert!(status == StatusCode::OK || status == StatusCode::INTERNAL_SERVER_ERROR);
     
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let chat_response: serde_json::Value = serde_json::from_slice(&body).unwrap();
     
     if status == StatusCode::OK {
@@ -290,4 +289,3 @@ async fn test_not_found_endpoint() {
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
-

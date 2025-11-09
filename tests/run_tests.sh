@@ -27,7 +27,7 @@ cargo test --package tts_core --package llm_core --package server --lib || {
 echo -e "${GREEN}✅ Unit tests passed${NC}"
 
 echo -e "${YELLOW}🔗 Running integration tests...${NC}"
-cargo test --test integration || {
+cargo test --package server --test integration || {
     echo -e "${RED}❌ Integration tests failed${NC}"
     exit 1
 }
