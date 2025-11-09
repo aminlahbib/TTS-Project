@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  tts-server:
+    build: .
+    ports:
+      - "8085:8085"
+    environment:
+      - PORT=8085
+      - RUST_LOG=info
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - LLM_MODEL=${LLM_MODEL:-gpt-3.5-turbo}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - QDRANT_URL=${QDRANT_URL}
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-60}
+    volumes:
+      - ./models:/app/models:ro
+

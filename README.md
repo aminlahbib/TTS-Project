@@ -4,6 +4,17 @@ High-performance multilingual Text-to-Speech and Chat server built with Rust, fe
 
 ## Quick Start
 
+**Docker (Recommended):**
+```bash
+# Build and run with Docker
+docker build -t tts-server .
+docker run -p 8085:8085 -e OPENAI_API_KEY="your_key" tts-server
+
+# Or use docker-compose
+docker-compose up --build
+```
+
+**Local Build:**
 ```bash
 # Build and run
 cargo build --release
@@ -50,15 +61,36 @@ Rust workspace with three crates:
 | `OPENAI_API_KEY` | Yes* | - | OpenAI API key (*for OpenAI provider) |
 | `LLM_PROVIDER` | No | `openai` | `openai` or `ollama` |
 | `LLM_MODEL` | No | `gpt-3.5-turbo` | Model name |
-| `QDRANT_URL` | No | - | Qdrant server URL (optional) |
+| `QDRANT_URL` | No | - | Qdrant server URL (optional, must not be empty) |
 | `RATE_LIMIT_PER_MINUTE` | No | `60` | Rate limit per minute |
 | `RUST_LOG` | No | `info` | Log level |
+| `PIPER_ESPEAKNG_DATA_DIRECTORY` | No | `/usr/share` | eSpeak-ng data directory (auto-set in Docker) |
 
 ## Requirements
 
-- **Rust** 1.70+ ([rustup.rs](https://rustup.rs))
+- **Docker** (recommended) or **Rust** 1.70+ ([rustup.rs](https://rustup.rs))
 - **Piper Models** (~70MB each, download separately)
 - **OpenAI API Key** (required for chat, optional for TTS only)
+
+## Docker
+
+The project includes a multi-stage Dockerfile for easy deployment:
+
+```bash
+# Build image
+docker build -t tts-server .
+
+# Run container
+docker run -p 8085:8085 \
+  -e OPENAI_API_KEY="your_key" \
+  -e LLM_PROVIDER="openai" \
+  tts-server
+
+# Or use docker-compose
+docker-compose up --build
+```
+
+The Docker image includes all models and dependencies. See `docker-compose.yml` for environment variable configuration.
 
 ## Documentation
 

@@ -104,9 +104,14 @@ async fn async_main() -> anyhow::Result<()> {
     info!("Using LLM provider: {:?}, model: {}", provider, model);
 
     // Init LLM client with optional Qdrant storage
-    let llm = if std::env::var("QDRANT_URL").is_ok() {
-        info!("Initializing LLM client with Qdrant storage");
-        LlmClient::with_storage(provider, &model, None).await?
+    let llm = if let Ok(qdrant_url) = std::env::var("QDRANT_URL") {
+        if !qdrant_url.is_empty() {
+            info!("Initializing LLM client with Qdrant storage");
+            LlmClient::with_storage(provider, &model, None).await?
+        } else {
+            info!("Initializing LLM client without storage (QDRANT_URL is empty)");
+            LlmClient::new(provider, &model)?
+        }
     } else {
         info!("Initializing LLM client without storage");
         LlmClient::new(provider, &model)?

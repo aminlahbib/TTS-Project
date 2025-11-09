@@ -1,0 +1,12 @@
+target/
+.git/
+.idea/
+.DS_Store
+*.md
+tests/
+frontend/
+scripts/
+piper-voices/
+.env
+*.log
+

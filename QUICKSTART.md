@@ -2,12 +2,30 @@
 
 ## Prerequisites
 
-- Rust 1.70+ ([rustup.rs](https://rustup.rs))
+- **Docker** (recommended) or **Rust** 1.70+ ([rustup.rs](https://rustup.rs))
 - Piper TTS models (~70MB each, download from [Piper releases](https://github.com/rhasspy/piper/releases))
 
 ## Setup
 
-### 1. Download Models
+### Option 1: Docker (Recommended)
+
+```bash
+# Build and run
+docker build -t tts-server .
+docker run -p 8085:8085 \
+  -e OPENAI_API_KEY="your_key" \
+  -e LLM_PROVIDER="openai" \
+  tts-server
+
+# Or use docker-compose
+docker-compose up --build
+```
+
+The Docker image includes all models and dependencies. Models are mounted from `./models` directory.
+
+### Option 2: Local Build
+
+#### 1. Download Models
 
 ```bash
 # Create directories
@@ -34,7 +52,7 @@ Verify `models/map.json`:
 }
 ```
 
-### 2. Configure Environment
+#### 2. Configure Environment
 
 ```bash
 # Required for chat
@@ -44,9 +62,10 @@ export LLM_PROVIDER="openai"
 # Optional
 export PORT=8085
 export RUST_LOG=info
+export PIPER_ESPEAKNG_DATA_DIRECTORY=/usr/share  # For local builds
 ```
 
-### 3. Build and Run
+#### 3. Build and Run
 
 ```bash
 # Build
@@ -109,6 +128,12 @@ lsof -i:8085 && kill -9 <PID>
 ```bash
 echo $OPENAI_API_KEY  # Verify key is set
 curl https://api.openai.com/v1/models -H "Authorization: Bearer $OPENAI_API_KEY"
+```
+
+**eSpeak-ng errors:**
+```bash
+# Set data directory (usually /usr/share on Linux)
+export PIPER_ESPEAKNG_DATA_DIRECTORY=/usr/share
 ```
 
 See [README.md](README.md) for full API documentation.
