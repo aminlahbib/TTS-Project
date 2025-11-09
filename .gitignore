@@ -20,4 +20,8 @@ tts_project_wiki copy.md
 
 models/.DS_Store
 server/.DS_Store
-tests/.DS_Store
+tests/.DS_Storetarget/
+*.onnx
+*.pdb
+*.rlib
+
