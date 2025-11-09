@@ -28,15 +28,22 @@ tests/
 # Install Rust (if not already installed)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-# Install test dependencies
-cargo install cargo-nextest  # Optional: faster test runner
+# Install test dependencies (optional)
+# Optional: faster test runner
+cargo install cargo-nextest
+
+# For code coverage reports
+cargo install cargo-tarpaulin
 ```
 
 ### Running Tests
 
 ```bash
-# Run all tests
+# Run all tests (if you encounter timeout errors, see COMPILATION_TIPS.md)
 cargo test --workspace
+
+# Run with limited parallelism (recommended if you get timeout errors)
+CARGO_BUILD_JOBS=2 cargo test --workspace
 
 # Run tests with output
 cargo test --workspace -- --nocapture
@@ -46,12 +53,17 @@ cargo test --package tts_core
 cargo test --package llm_core
 cargo test --package server
 
+# Run unit tests only
+cargo test --workspace --lib
+
 # Run integration tests only
 cargo test --test integration
 
 # Run with coverage (requires cargo-tarpaulin)
 cargo tarpaulin --workspace --out Html
 ```
+
+**Note:** If you encounter timeout errors during compilation, see `COMPILATION_TIPS.md` for solutions.
 
 ## 📋 Test Categories
 
