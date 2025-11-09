@@ -1,5 +1,5 @@
-mod error;
-mod validation;
+pub mod error;
+pub mod validation;
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
@@ -27,9 +27,9 @@ use crate::error::ApiError;
 use crate::validation::{validate_chat_request, validate_conversation_id, validate_tts_request};
 
 #[derive(Clone)]
-struct AppState {
-    tts: Arc<tts_core::TtsManager>,
-    llm: Arc<std::sync::Mutex<LlmClient>>,
+pub struct AppState {
+    pub tts: Arc<tts_core::TtsManager>,
+    pub llm: Arc<std::sync::Mutex<LlmClient>>,
 }
 
 // ---- Basic request/response types ----
@@ -189,15 +189,15 @@ async fn async_main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn health_check() -> &'static str {
+pub async fn health_check() -> &'static str {
     "ok"
 }
 
-async fn list_voices(State(state): State<AppState>) -> Json<Vec<String>> {
+pub async fn list_voices(State(state): State<AppState>) -> Json<Vec<String>> {
     Json(state.tts.list_languages())
 }
 
-async fn list_voices_detail(State(state): State<AppState>) -> Json<Vec<VoiceInfo>> {
+pub async fn list_voices_detail(State(state): State<AppState>) -> Json<Vec<VoiceInfo>> {
     let mut out = Vec::new();
     for (k, (cfg, spk)) in state.tts.map_iter() {
         out.push(VoiceInfo {
@@ -209,7 +209,7 @@ async fn list_voices_detail(State(state): State<AppState>) -> Json<Vec<VoiceInfo
     Json(out)
 }
 
-async fn tts_endpoint(
+pub async fn tts_endpoint(
     State(state): State<AppState>,
     Json(req): Json<TtsRequest>,
 ) -> Result<Json<TtsResponse>, ApiError> {
@@ -252,7 +252,7 @@ async fn tts_endpoint(
     }))
 }
 
-async fn chat_endpoint(
+pub async fn chat_endpoint(
     State(state): State<AppState>,
     Json(req): Json<ChatRequest>,
 ) -> Result<Json<ChatResponse>, ApiError> {
@@ -288,7 +288,7 @@ async fn chat_endpoint(
 }
 
 // GET /stream/:lang/:text -> websocket that streams (audio_chunk, mel_frame)
-async fn stream_ws(
+pub async fn stream_ws(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
     Path((lang, text)): Path<(String, String)>,

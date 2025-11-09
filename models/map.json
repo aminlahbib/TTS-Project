@@ -6,13 +6,5 @@
   "fr_FR": {
     "config": "models/fr_FR/fr_FR-siwis-medium.onnx.json",
     "speaker": null
-  },
-  "nl_NL": {
-    "config": "models/nl_NL/fr_FR-siwis-medium.onnx.json",
-    "speaker": null
-  },
-  "ar_JO": {
-    "config": "models/ar_JO/fr_FR-siwis-medium.onnx.json",
-    "speaker": null
   }
 }
