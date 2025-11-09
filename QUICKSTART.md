@@ -17,18 +17,62 @@ This guide will help you set up and run the TTS Project server in a production-r
 
 ---
 
+## Quick Reference
+
+### Essential Commands
+
+```bash
+# Clean build
+cargo clean && cargo build --release
+
+# Start server
+cargo run --release -p server
+
+# Run tests
+cargo test --workspace
+
+# Verify models
+python3 scripts/check_models.py
+
+# Health check
+curl http://localhost:8085/health
+```
+
+### Environment Variables
+
+```bash
+# Required for chat
+export OPENAI_API_KEY="your_key"
+export LLM_PROVIDER="openai"
+
+# Optional
+export PORT=8085
+export RUST_LOG=info
+```
+
+### Common Workflows
+
+**Development:**
+```bash
+cargo build
+RUST_LOG=debug cargo run -p server
+```
+
+**Production:**
+```bash
+cargo build --release
+RUST_LOG=info cargo run --release -p server
+```
+
+**Testing:**
+```bash
+cargo test --workspace -- --nocapture
+```
+
+
+---
+
 ## Prerequisites
-
-### System Requirements
-
-Before proceeding, ensure your system meets the following requirements:
-
-| Requirement | Version | Installation |
-|------------|---------|--------------|
-| **Rust** | 1.70+ | [rustup.rs](https://rustup.rs) |
-| **Cargo** | Included with Rust | Automatically installed |
-| **Git** | Latest | System package manager |
-| **Python** | 3.8+ (optional) | For utility scripts |
 
 ### Verification
 
@@ -44,20 +88,7 @@ git --version    # Should display git version
 
 ## Initial Setup
 
-### 1. Clone and Navigate
-
-```bash
-# Navigate to your project directory
-cd /path/to/tts_project
-
-# Verify you're in the correct directory
-ls -la Cargo.toml
-```
-
-### 2. Clean Build Environment (Recommended)
-
-For a clean build, remove any previous build artifacts:
-
+### Clean Build Environment (Recommended)
 ```bash
 # Clean Cargo build cache
 cargo clean
@@ -66,34 +97,13 @@ cargo clean
 rm -rf target/
 ```
 
-### 3. Verify Project Structure
-
-Confirm the workspace structure:
-
-```
-tts_project/
-├── Cargo.toml              # Workspace configuration
-├── models/
-│   ├── map.json            # Language-to-model mapping
-│   └── <lang_code>/        # Model directories
-│       ├── *.onnx          # Model binary
-│       └── *.onnx.json     # Model configuration
-├── tts_core/               # TTS engine wrapper
-├── llm_core/               # LLM client abstraction
-└── server/                 # HTTP API server
-```
-
----
-
 ## Model Configuration
 
 ### Overview
 
 TTS models are not included in the repository due to their size (~70MB per model). You must download and configure them separately.
 
-### Download Methods
-
-#### Method 1: Manual Download (Recommended)
+#### Manual Download (Recommended)
 
 1. **Visit the Piper TTS Repository**
    - Navigate to: https://github.com/rhasspy/piper/releases
@@ -115,16 +125,6 @@ TTS models are not included in the repository due to their size (~70MB per model
    ├── fr_FR-siwis-medium.onnx
    └── fr_FR-siwis-medium.onnx.json
    ```
-
-#### Method 2: Automated Script
-
-```bash
-# Run the download script (if available)
-python3 scripts/download_voices.py
-
-# Verify models are correctly placed
-python3 scripts/check_models.py
-```
 
 ### Model Configuration
 
@@ -148,28 +148,9 @@ cat models/map.json
 }
 ```
 
-**Validation:**
-- Paths must be relative to project root
-- Model files must exist at specified paths
-- JSON syntax must be valid
-
----
-
 ## Environment Configuration
 
 ### Configuration Methods
-
-#### Option 1: Environment File (Recommended)
-
-Create a `.env` file in the project root:
-
-```bash
-# Create from template (if available)
-cp .env.example .env
-
-# Or create manually
-touch .env
-```
 
 **Configuration Template:**
 
@@ -199,8 +180,6 @@ RUST_LOG=info                          # Log level: error, warn, info, debug, tr
 # ============================================
 # OLLAMA_BASE_URL=http://localhost:11434
 ```
-
-**Security Note:** The `.env` file is gitignored and will not be committed to version control.
 
 #### Option 2: Environment Variables
 
@@ -611,73 +590,3 @@ df -h
 - **Integration Tests:** `cargo test --test integration`
 - **Manual Testing:** Use curl commands or frontend interface
 
----
-
-## Quick Reference
-
-### Essential Commands
-
-```bash
-# Clean build
-cargo clean && cargo build --release
-
-# Start server
-cargo run --release -p server
-
-# Run tests
-cargo test --workspace
-
-# Verify models
-python3 scripts/check_models.py
-
-# Health check
-curl http://localhost:8085/health
-```
-
-### Environment Variables
-
-```bash
-# Required for chat
-export OPENAI_API_KEY="your_key"
-export LLM_PROVIDER="openai"
-
-# Optional
-export PORT=8085
-export RUST_LOG=info
-```
-
-### Common Workflows
-
-**Development:**
-```bash
-cargo build
-RUST_LOG=debug cargo run -p server
-```
-
-**Production:**
-```bash
-cargo build --release
-RUST_LOG=info cargo run --release -p server
-```
-
-**Testing:**
-```bash
-cargo test --workspace -- --nocapture
-```
-
----
-
-## Support
-
-For additional help:
-
-1. **Check Documentation:** Review `README.md` and `PROJECT_ANALYSIS.md`
-2. **Review Logs:** Check server logs with `RUST_LOG=debug`
-3. **Test Endpoints:** Use Postman collection or curl commands
-4. **Verify Configuration:** Ensure all environment variables are set correctly
-
----
-
-**Last Updated:** 2024  
-**Server Port:** 8085  
-**Status:** Production Ready ✅

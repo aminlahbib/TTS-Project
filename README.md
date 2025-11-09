@@ -2,16 +2,34 @@
 
 A high-performance multilingual Text-to-Speech and Chat server built with Rust, featuring Piper TTS engine integration and OpenAI/Ollama LLM support.
 
-## 🚀 Quick Start
+## Quick START
 
-**New to the project?** Start here: **[QUICKSTART.md](QUICKSTART.md)**
+### Essential Commands
 
-The quick start guide will walk you through:
-- Prerequisites and installation
-- Model setup
-- Environment configuration
-- Building and running the server
-- Testing the API
+```bash
+# Clean build
+cargo clean && cargo build --release
+
+# Start server
+cargo run --release -p server
+
+# Run tests
+cargo test --workspace
+
+# Verify models
+python3 scripts/check_models.py
+
+# Health check
+curl http://localhost:8085/health
+```
+
+### Environment Variables
+
+```bash
+# Required for chat
+export OPENAI_API_KEY="your_key"
+export LLM_PROVIDER="openai"
+```
 
 ## 📦 Project Structure
 
