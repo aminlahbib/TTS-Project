@@ -1,12 +1,25 @@
-# TTS Project Structure
+# TTS Project
+
+A high-performance multilingual Text-to-Speech and Chat server built with Rust, featuring Piper TTS engine integration and OpenAI/Ollama LLM support.
+
+## 🚀 Quick Start
+
+**New to the project?** Start here: **[QUICKSTART.md](QUICKSTART.md)**
+
+The quick start guide will walk you through:
+- Prerequisites and installation
+- Model setup
+- Environment configuration
+- Building and running the server
+- Testing the API
+
+## 📦 Project Structure
 
 This repository contains a Rust workspace with three crates:
 
-- **tts_core** – wraps Piper TTS models and provides functions for synthesizing speech and computing mel spectrograms.
-- **llm_core** – loads a local LLM, stores conversation history in Qdrant and generates replies.
-- **server** – exposes HTTP endpoints (`/tts` and `/chat`) for text‑to‑speech synthesis and conversational chat.
-
-Download the necessary models into a `models` directory at the root of the workspace.  Then run `cargo run -p server` to start the API server.
+- **tts_core** – Wraps Piper TTS models and provides functions for synthesizing speech and computing mel spectrograms.
+- **llm_core** – LLM client supporting OpenAI and Ollama, with optional Qdrant integration for conversation history.
+- **server** – HTTP API server exposing endpoints for TTS synthesis and conversational chat.
 
 
 # Multilingual Text‑to‑Speech & Chat Server (Rust)

@@ -12,7 +12,7 @@ anyhow = "1.0"
 thiserror = "1.0"
 tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "trace", "timeout", "limit"] }
-tower-governor = { version = "0.2", features = ["axum"] }
+tower_governor = { version = "0.8", features = ["axum"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 mel_spec = "0.3"

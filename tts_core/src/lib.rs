@@ -27,6 +27,16 @@ struct CachedSynth {
     sample_rate: u32,
 }
 
+// Manual Debug implementation since PiperSpeechSynthesizer doesn't implement Debug
+impl std::fmt::Debug for CachedSynth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CachedSynth")
+            .field("synth", &"<PiperSpeechSynthesizer>")
+            .field("sample_rate", &self.sample_rate)
+            .finish()
+    }
+}
+
 #[derive(Debug)]
 pub struct TtsManager {
     // language key -> (config path, default speaker)
@@ -209,16 +219,19 @@ impl TtsManager {
         lang_opt: Option<&str>,
         speaker_override: Option<i64>,
     ) -> anyhow::Result<Vec<f32>> {
-        let (cfg_path, default_speaker) = self.config_for(lang_opt)?;
-        let speaker_id = speaker_override.or(default_speaker);
+        let (cfg_path, _default_speaker) = self.config_for(lang_opt)?;
+        // Note: speaker_override is kept in API for future use but not yet used in piper-rs API
+        // The synthesize_parallel method expects Option<AudioOutputConfig>, not speaker ID
+        // Speaker selection may need to be implemented differently in future versions
+        let _ = speaker_override; // Suppress unused variable warning
 
         // Get or create cached synthesizer
         let (synth_arc, _) = self.get_or_create_synth(&cfg_path)?;
         let synth = synth_arc.lock().unwrap();
         
-        // Pass speaker_id to synthesize_parallel (None if not specified)
+        // Pass None for audio output config (speaker selection not yet supported in API)
         let iter: PiperSpeechStreamParallel = synth
-            .synthesize_parallel(text.to_string(), speaker_id)
+            .synthesize_parallel(text.to_string(), None)
             .map_err(|e| anyhow::anyhow!("piper synth error: {e}"))?;
 
         let mut samples: Vec<f32> = Vec::new();
@@ -238,8 +251,10 @@ impl TtsManager {
         lang_opt: Option<&str>,
         speaker_override: Option<i64>,
     ) -> anyhow::Result<(Vec<f32>, u32)> {
-        let (cfg_path, default_speaker) = self.config_for(lang_opt)?;
-        let speaker_id = speaker_override.or(default_speaker);
+        let (cfg_path, _default_speaker) = self.config_for(lang_opt)?;
+        // Note: speaker_override is kept in API for future use but not yet used in piper-rs API
+        // The synthesize_parallel method expects Option<AudioOutputConfig>, not speaker ID
+        let _ = speaker_override; // Suppress unused variable warning
         
         // Get sample rate (uses cache)
         let sample_rate = self.get_sample_rate(&cfg_path)?;
@@ -248,9 +263,9 @@ impl TtsManager {
         let (synth_arc, _) = self.get_or_create_synth(&cfg_path)?;
         let synth = synth_arc.lock().unwrap();
         
-        // Pass speaker_id to synthesize_parallel (None if not specified)
+        // Pass None for audio output config (speaker selection not yet supported in API)
         let iter: PiperSpeechStreamParallel = synth
-            .synthesize_parallel(text.to_string(), speaker_id)
+            .synthesize_parallel(text.to_string(), None)
             .map_err(|e| anyhow::anyhow!("piper synth error: {e}"))?;
 
         let mut samples: Vec<f32> = Vec::new();

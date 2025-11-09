@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use qdrant_client::{
-    prelude::*,
     qdrant::{
-        point_id::PointIdOptions, vectors_config::Config, CreateCollection, Distance, PointStruct,
+        vectors_config::Config, Distance, PointStruct,
         VectorParams, VectorsConfig,
     },
+    Qdrant,
 };
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
@@ -214,22 +214,30 @@ impl LlmProviderTrait for OllamaClient {
 
 /// Qdrant client wrapper for conversation storage
 pub struct QdrantStorage {
-    client: Arc<QdrantClient>,
+    client: Arc<Qdrant>,
     collection_name: String,
 }
 
 impl QdrantStorage {
     /// Create a new Qdrant storage client
     pub async fn new(collection_name: Option<String>) -> Result<Self> {
+        use qdrant_client::config::QdrantConfig;
+        
         let url = env::var("QDRANT_URL").unwrap_or_else(|_| "http://localhost:6333".to_string());
         let api_key = env::var("QDRANT_API_KEY").ok();
         
-        let mut config = QdrantClientConfig::from_url(&url);
-        if let Some(key) = api_key {
-            config = config.with_api_key(&key);
-        }
-
-        let client = QdrantClient::new(Some(config))?;
+        // Use new Qdrant API
+        let config = QdrantConfig::from_url(&url);
+        let config = if let Some(key) = api_key {
+            QdrantConfig {
+                api_key: Some(key),
+                ..config
+            }
+        } else {
+            config
+        };
+        
+        let client = Qdrant::new(config)?;
         let collection_name = collection_name.unwrap_or_else(|| "conversations".to_string());
 
         // Ensure collection exists
@@ -251,8 +259,10 @@ impl QdrantStorage {
             .any(|c| c.name == self.collection_name);
 
         if !collection_exists {
+            use qdrant_client::qdrant::CreateCollection;
+            
             self.client
-                .create_collection(&CreateCollection {
+                .create_collection(CreateCollection {
                     collection_name: self.collection_name.clone(),
                     vectors_config: Some(VectorsConfig {
                         config: Some(Config::Params(VectorParams {
@@ -276,10 +286,16 @@ impl QdrantStorage {
             .context("Failed to serialize conversation")?;
         
         // Convert to payload format
-        let mut payload = HashMap::new();
+        use qdrant_client::qdrant::Value;
+        use std::collections::HashMap;
+        
+        let mut payload: HashMap<String, Value> = HashMap::new();
         if let serde_json::Value::Object(map) = json_value {
             for (key, value) in map {
-                payload.insert(key, value);
+                // Convert serde_json::Value to qdrant Value
+                let qdrant_value: Value = serde_json::from_value(value)
+                    .context("Failed to convert JSON value to Qdrant Value")?;
+                payload.insert(key, qdrant_value);
             }
         }
 
@@ -289,11 +305,17 @@ impl QdrantStorage {
         let point = PointStruct::new(
             conversation.id.clone(),
             vector,
-            payload.into(),
+            payload,
         );
 
+        use qdrant_client::qdrant::UpsertPoints;
+        
         self.client
-            .upsert_points(self.collection_name.clone(), vec![point], None)
+            .upsert_points(UpsertPoints {
+                collection_name: self.collection_name.clone(),
+                points: vec![point],
+                ..Default::default()
+            })
             .await
             .context("Failed to store conversation in Qdrant")?;
 
@@ -302,14 +324,18 @@ impl QdrantStorage {
 
     /// Retrieve a conversation by ID
     pub async fn get_conversation(&self, conversation_id: &str) -> Result<Option<Conversation>> {
+        use qdrant_client::qdrant::{PointId, GetPoints};
+        
+        let point_id: PointId = conversation_id.into();
         let points = self
             .client
-            .get_points(
-                self.collection_name.clone(),
-                &[conversation_id.into()],
-                Some(true),
-                Some(true),
-            )
+            .get_points(GetPoints {
+                collection_name: self.collection_name.clone(),
+                ids: vec![point_id],
+                with_payload: Some(true.into()),
+                with_vectors: Some(true.into()),
+                ..Default::default()
+            })
             .await?;
 
         if points.result.is_empty() {
@@ -333,17 +359,25 @@ impl QdrantStorage {
         offset: Option<usize>,
     ) -> Result<Vec<Conversation>> {
         let limit = limit.unwrap_or(100);
-        let offset = offset.unwrap_or(0);
+        let _offset = offset.unwrap_or(0); // Note: offset not yet used in ScrollPoints API
 
+        // Use scroll with new API signature
+        use qdrant_client::qdrant::ScrollPoints;
+        
         let scroll_result = self
             .client
-            .scroll_points(
-                self.collection_name.clone(),
-                Some(limit as u64),
-                None,
-                Some(offset as u64),
-                None,
-            )
+            .scroll(ScrollPoints {
+                collection_name: self.collection_name.clone(),
+                limit: Some(limit as u32),
+                offset: None, // offset is not a u64, it's a PointId for pagination
+                with_payload: Some(true.into()),
+                with_vectors: Some(false.into()),
+                filter: None,
+                order_by: None,
+                read_consistency: None,
+                shard_key_selector: None,
+                timeout: None,
+            })
             .await?;
 
         let mut conversations = Vec::new();
@@ -482,9 +516,5 @@ impl LlmClient {
 }
 
 // Legacy compatibility: Create a simple wrapper that matches the old API
-impl OpenAiClient {
-    /// Create a new OpenAI client (legacy compatibility)
-    pub fn new(model: &str) -> Result<LlmClient> {
-        LlmClient::new(LlmProvider::OpenAI, model)
-    }
-}
+// Note: OpenAiClient already has a `new` method that returns OpenAiClient
+// This is handled by the LlmClient::new method which creates the appropriate provider
