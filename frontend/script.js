@@ -15,64 +15,72 @@ let voices = [];
 let voiceDetails = [];
 let currentAudioBlob = null;
 
-// DOM Elements
-const elements = {
-    // Forms
-    ttsForm: document.getElementById('ttsForm'),
-    streamForm: document.getElementById('streamForm'),
-    chatForm: document.getElementById('chatForm'),
-    
-    // Inputs
-    ttsText: document.getElementById('ttsText'),
-    ttsLanguage: document.getElementById('ttsLanguage'),
-    ttsSpeaker: document.getElementById('ttsSpeaker'),
-    streamText: document.getElementById('streamText'),
-    streamLanguage: document.getElementById('streamLanguage'),
-    chatInput: document.getElementById('chatInput'),
-    serverUrl: document.getElementById('serverUrl'),
-    
-    // Buttons
-    ttsBtn: document.getElementById('ttsBtn'),
-    streamBtn: document.getElementById('streamBtn'),
-    chatBtn: document.getElementById('chatBtn'),
-    downloadTtsBtn: document.getElementById('downloadTtsBtn'),
-    clearChatBtn: document.getElementById('clearChatBtn'),
-    exportChatBtn: document.getElementById('exportChatBtn'),
-    
-    // Status and Output
-    ttsStatus: document.getElementById('ttsStatus'),
-    streamStatus: document.getElementById('streamStatus'),
-    chatStatus: document.getElementById('chatStatus'),
-    serverStatus: document.getElementById('serverStatus'),
-    serverInfo: document.getElementById('serverInfo'),
-    
-    // Audio and Media
-    ttsAudio: document.getElementById('ttsAudio'),
-    streamAudio: document.getElementById('streamAudio'),
-    ttsSpectrogram: document.getElementById('ttsSpectrogram'),
-    chatMessages: document.getElementById('chatMessages'),
-    streamProgress: document.getElementById('streamProgress'),
-    
-    // Custom Audio Player
-    ttsAudioPlayer: document.getElementById('ttsAudioPlayer'),
-    ttsPlayPause: document.getElementById('ttsPlayPause'),
-    ttsProgress: document.getElementById('ttsProgress'),
-    ttsWaveform: document.getElementById('ttsWaveform'),
-    ttsDownloadBtn: document.getElementById('ttsDownloadBtn'),
-    ttsCurrentTime: document.querySelector('#ttsAudioPlayer .current-time'),
-    ttsDuration: document.querySelector('#ttsAudioPlayer .duration'),
-    
-    // Groups
-    speakerGroup: document.getElementById('speakerGroup'),
-    ttsCharCount: document.getElementById('ttsCharCount'),
-    
-    // Toast container
-    toastContainer: document.getElementById('toastContainer')
-};
+// DOM Elements - Initialize after DOM is ready
+let elements = {};
+
+// Initialize DOM elements
+function initElements() {
+    elements = {
+        // Forms
+        ttsForm: document.getElementById('ttsForm'),
+        streamForm: document.getElementById('streamForm'),
+        chatForm: document.getElementById('chatForm'),
+        
+        // Inputs
+        ttsText: document.getElementById('ttsText'),
+        ttsLanguage: document.getElementById('ttsLanguage'),
+        ttsSpeaker: document.getElementById('ttsSpeaker'),
+        streamText: document.getElementById('streamText'),
+        streamLanguage: document.getElementById('streamLanguage'),
+        chatInput: document.getElementById('chatInput'),
+        serverUrl: document.getElementById('serverUrl'),
+        
+        // Buttons
+        ttsBtn: document.getElementById('ttsBtn'),
+        streamBtn: document.getElementById('streamBtn'),
+        chatBtn: document.getElementById('chatBtn'),
+        downloadTtsBtn: document.getElementById('downloadTtsBtn'),
+        clearChatBtn: document.getElementById('clearChatBtn'),
+        exportChatBtn: document.getElementById('exportChatBtn'),
+        
+        // Status and Output
+        ttsStatus: document.getElementById('ttsStatus'),
+        streamStatus: document.getElementById('streamStatus'),
+        chatStatus: document.getElementById('chatStatus'),
+        serverStatus: document.getElementById('serverStatus'),
+        serverInfo: document.getElementById('serverInfo'),
+        
+        // Audio and Media
+        ttsAudio: document.getElementById('ttsAudio'),
+        streamAudio: document.getElementById('streamAudio'),
+        ttsSpectrogram: document.getElementById('ttsSpectrogram'),
+        chatMessages: document.getElementById('chatMessages'),
+        streamProgress: document.getElementById('streamProgress'),
+        
+        // Custom Audio Player
+        ttsAudioPlayer: document.getElementById('ttsAudioPlayer'),
+        ttsPlayPause: document.getElementById('ttsPlayPause'),
+        ttsProgress: document.getElementById('ttsProgress'),
+        ttsWaveform: document.getElementById('ttsWaveform'),
+        ttsDownloadBtn: document.getElementById('ttsDownloadBtn'),
+        ttsCurrentTime: document.querySelector('#ttsAudioPlayer .current-time'),
+        ttsDuration: document.querySelector('#ttsAudioPlayer .duration'),
+        
+        // Groups
+        speakerGroup: document.getElementById('speakerGroup'),
+        ttsCharCount: document.getElementById('ttsCharCount'),
+        
+        // Toast container
+        toastContainer: document.getElementById('toastContainer')
+    };
+}
 
 // Initialize the application
 async function init() {
     console.log('TTS Project Frontend Initializing...');
+    
+    // Initialize DOM elements
+    initElements();
     
     // Set up tabs
     setupTabs();
@@ -95,24 +103,61 @@ async function init() {
     console.log('Frontend initialized successfully');
 }
 
+// Tab configuration with titles and descriptions
+const tabConfig = {
+    tts: { title: 'Text-to-Speech', desc: 'Convert text to natural-sounding speech' },
+    stream: { title: 'Real-time Streaming', desc: 'Stream audio in real-time' },
+    chat: { title: 'AI Chat', desc: 'Chat with AI assistant' },
+    server: { title: 'Server Information', desc: 'Server status and configuration' }
+};
+
 // Tab functionality
 function setupTabs() {
     const tabButtons = document.querySelectorAll('.tab-btn');
     const tabContents = document.querySelectorAll('.tab-content');
+    const pageTitle = document.getElementById('pageTitle');
+    const pageDescription = document.getElementById('pageDescription');
+    
+    // Ensure only the first tab is visible initially
+    tabContents.forEach((content, index) => {
+        if (index === 0) {
+            content.classList.add('active');
+            const firstTab = content.getAttribute('data-tab');
+            if (firstTab && tabConfig[firstTab]) {
+                if (pageTitle) pageTitle.textContent = tabConfig[firstTab].title;
+                if (pageDescription) pageDescription.textContent = tabConfig[firstTab].desc;
+            }
+        } else {
+            content.classList.remove('active');
+        }
+    });
     
     tabButtons.forEach(button => {
-        button.addEventListener('click', () => {
+        button.addEventListener('click', (e) => {
+            e.preventDefault();
             const targetTab = button.getAttribute('data-tab');
+            
+            if (!targetTab) return;
             
             // Remove active class from all buttons and contents
             tabButtons.forEach(btn => btn.classList.remove('active'));
             tabContents.forEach(content => content.classList.remove('active'));
             
-            // Add active class to clicked button and corresponding content
+            // Add active class to clicked button
             button.classList.add('active');
-            const targetContent = document.querySelector(`[data-tab="${targetTab}"]`);
+            
+            // Find and activate the corresponding content section
+            const targetContent = document.querySelector(`.tab-content[data-tab="${targetTab}"]`);
             if (targetContent) {
                 targetContent.classList.add('active');
+                
+                // Update page title and description
+                if (tabConfig[targetTab]) {
+                    if (pageTitle) pageTitle.textContent = tabConfig[targetTab].title;
+                    if (pageDescription) pageDescription.textContent = tabConfig[targetTab].desc;
+                }
+            } else {
+                console.error(`Tab content not found for: ${targetTab}`);
             }
         });
     });
@@ -157,9 +202,10 @@ async function loadVoiceDetails() {
 
 // Populate language select elements
 function populateLanguageSelects() {
-    const selects = [elements.ttsLanguage, elements.streamLanguage];
+    const selects = [elements.ttsLanguage, elements.streamLanguage].filter(Boolean);
     
     selects.forEach(select => {
+        if (!select) return;
         select.innerHTML = '<option value="">Select language...</option>';
         
         voices.forEach(voice => {
@@ -189,37 +235,57 @@ function formatLanguageName(code) {
 // Set up event listeners
 function setupEventListeners() {
     // TTS Form Handler
-    elements.ttsForm.addEventListener('submit', handleTtsSubmit);
+    if (elements.ttsForm) {
+        elements.ttsForm.addEventListener('submit', handleTtsSubmit);
+    }
     
     // Language change handler for speaker selection
-    elements.ttsLanguage.addEventListener('change', handleLanguageChange);
+    if (elements.ttsLanguage) {
+        elements.ttsLanguage.addEventListener('change', handleLanguageChange);
+    }
     
     // Streaming Form Handler
-    elements.streamForm.addEventListener('submit', handleStreamSubmit);
+    if (elements.streamForm) {
+        elements.streamForm.addEventListener('submit', handleStreamSubmit);
+    }
     
     // Chat Form Handler
-    elements.chatForm.addEventListener('submit', handleChatSubmit);
+    if (elements.chatForm) {
+        elements.chatForm.addEventListener('submit', handleChatSubmit);
+    }
     
     // Enter key support for chat
-    elements.chatInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            elements.chatForm.dispatchEvent(new Event('submit'));
-        }
-    });
+    if (elements.chatInput) {
+        elements.chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                if (elements.chatForm) {
+                    elements.chatForm.dispatchEvent(new Event('submit'));
+                }
+            }
+        });
+    }
     
     // Download button
-    elements.downloadTtsBtn.addEventListener('click', downloadTtsAudio);
+    if (elements.downloadTtsBtn) {
+        elements.downloadTtsBtn.addEventListener('click', downloadTtsAudio);
+    }
     
     // Clear chat button
-    elements.clearChatBtn.addEventListener('click', clearChat);
+    if (elements.clearChatBtn) {
+        elements.clearChatBtn.addEventListener('click', clearChat);
+    }
     
     // Export chat button
-    elements.exportChatBtn.addEventListener('click', exportChat);
+    if (elements.exportChatBtn) {
+        elements.exportChatBtn.addEventListener('click', exportChat);
+    }
 }
 
 // Set up character counter
 function setupCharacterCounter() {
+    if (!elements.ttsText || !elements.ttsCharCount) return;
+    
     elements.ttsText.addEventListener('input', () => {
         const count = elements.ttsText.value.length;
         elements.ttsCharCount.textContent = count;
@@ -230,6 +296,8 @@ function setupCharacterCounter() {
 
 // Handle language change for speaker selection
 function handleLanguageChange() {
+    if (!elements.ttsLanguage || !elements.speakerGroup) return;
+    
     const language = elements.ttsLanguage.value;
     const voiceDetail = voiceDetails.find(v => v.key === language);
     
@@ -247,9 +315,11 @@ function handleLanguageChange() {
 async function handleTtsSubmit(e) {
     e.preventDefault();
     
+    if (!elements.ttsText || !elements.ttsLanguage) return;
+    
     const text = elements.ttsText.value.trim();
     const language = elements.ttsLanguage.value;
-    const speaker = elements.ttsSpeaker.value ? parseInt(elements.ttsSpeaker.value) : null;
+    const speaker = elements.ttsSpeaker?.value ? parseInt(elements.ttsSpeaker.value) : null;
     
     if (!text) {
         showStatus(elements.ttsStatus, 'error', 'Please enter some text to synthesize');
@@ -263,8 +333,8 @@ async function handleTtsSubmit(e) {
     
     setButtonState(elements.ttsBtn, true, 'Generating...');
     showStatus(elements.ttsStatus, 'info', 'Generating speech...');
-    elements.downloadTtsBtn.style.display = 'none';
-    elements.ttsAudioPlayer.classList.add('hidden');
+    if (elements.downloadTtsBtn) elements.downloadTtsBtn.style.display = 'none';
+    if (elements.ttsAudioPlayer) elements.ttsAudioPlayer.classList.add('hidden');
     
     try {
         const requestBody = { text, language };
@@ -792,12 +862,14 @@ function displaySpectrogram(container, base64Data) {
 
 // Chat Functions
 function addChatMessage(sender, message) {
+    if (!elements.chatMessages) return;
+    
     const messageClass = sender === 'user' ? 'user' : 'bot';
-    const senderName = sender === 'user' ? 'You' : 'Bot';
     
     const messageElement = document.createElement('div');
     messageElement.className = `message ${messageClass}`;
-    messageElement.innerHTML = `<strong>${senderName}:</strong> ${escapeHtml(message)}`;
+    // textContent automatically escapes HTML, so escapeHtml is not needed
+    messageElement.textContent = message;
     
     elements.chatMessages.appendChild(messageElement);
     elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
@@ -805,9 +877,11 @@ function addChatMessage(sender, message) {
 
 // Clear chat
 function clearChat() {
+    if (!elements.chatMessages) return;
+    
     elements.chatMessages.innerHTML = `
         <div class="message bot welcome">
-            <strong>Bot:</strong> Hello! I'm your AI assistant. Ask me anything!
+            Hello! I'm your AI assistant. Ask me anything!
         </div>
     `;
     currentConversationId = null;
@@ -816,6 +890,8 @@ function clearChat() {
 
 // Export chat
 function exportChat() {
+    if (!elements.chatMessages) return;
+    
     const messages = Array.from(elements.chatMessages.querySelectorAll('.message'))
         .map(msg => msg.textContent)
         .join('\n');
@@ -946,27 +1022,45 @@ function setButtonState(button, disabled, text) {
     
     const btnText = button.querySelector('.btn-text');
     const btnSpinner = button.querySelector('.btn-spinner');
+    const sendIcon = button.querySelector('.send-icon');
     
-    if (btnText) {
-        btnText.textContent = text;
+    // For chat button, keep icon visible, hide text
+    if (button.id === 'chatBtn') {
+        if (btnSpinner) {
+            if (disabled) {
+                btnSpinner.classList.remove('hidden');
+                if (sendIcon) sendIcon.classList.add('hidden');
+            } else {
+                btnSpinner.classList.add('hidden');
+                if (sendIcon) sendIcon.classList.remove('hidden');
+            }
+        }
     } else {
-        button.textContent = text;
-    }
-    
-    if (btnSpinner) {
-        if (disabled) {
-            btnSpinner.classList.remove('hidden');
+        // For other buttons, use text
+        if (btnText) {
+            btnText.textContent = text;
         } else {
-            btnSpinner.classList.add('hidden');
+            button.textContent = text;
+        }
+        
+        if (btnSpinner) {
+            if (disabled) {
+                btnSpinner.classList.remove('hidden');
+            } else {
+                btnSpinner.classList.add('hidden');
+            }
         }
     }
 }
 
 function showStatus(element, type, message) {
+    if (!element) return;
     element.innerHTML = `<div class="status status-${type}">${message}</div>`;
 }
 
 function updateServerStatus(status, text) {
+    if (!elements.serverStatus) return;
+    
     elements.serverStatus.innerHTML = `<span class="status-dot"></span><span>${text}</span>`;
     elements.serverStatus.className = `status-badge ${status}`;
 }
