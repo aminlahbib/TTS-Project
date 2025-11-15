@@ -140,6 +140,7 @@ body {
 .main-content:has(#chatSection.active) .header {
     padding: var(--space-xl) var(--space-3xl) var(--space-lg);
     margin-bottom: 0;
+    flex-shrink: 0;
 }
 
 /* Custom Scrollbar - Right Positioned */
@@ -156,9 +157,29 @@ body {
     background: var(--border-light);
     border-radius: 4px;
     border: 1px solid var(--border);
+    transition: background 0.2s ease;
 }
 
 .main-content::-webkit-scrollbar-thumb:hover {
+    background: var(--border-lighter);
+}
+
+/* Sidebar scrollbar */
+.sidebar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.sidebar::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+    background: var(--border-light);
+    border-radius: 3px;
+    transition: background 0.2s ease;
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover {
     background: var(--border-lighter);
 }
 
@@ -168,10 +189,16 @@ body {
     scrollbar-color: var(--border-light) var(--bg);
 }
 
+.sidebar {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-light) transparent;
+}
+
 .header {
     margin-bottom: var(--space-3xl);
     padding-bottom: var(--space-lg);
     border-bottom: 1px solid var(--surface-lighter);
+    position: relative;
 }
 
 .header h1 {
@@ -233,15 +260,10 @@ body {
 /* Tabs */
 .tab-content {
     display: none;
-    opacity: 0;
-    transform: translateY(10px);
-    transition: opacity 0.3s ease, transform 0.3s ease;
 }
 
 .tab-content.active {
     display: block !important;
-    opacity: 1;
-    transform: translateY(0);
 }
 
 
@@ -524,12 +546,19 @@ select {
 
     .logo {
         font-size: var(--font-base);
+        margin-bottom: var(--space-lg);
     }
 
     .tab-btn {
         font-size: 0.8rem;
         text-align: center;
         padding: var(--space-xs);
+        position: relative;
+    }
+    
+    .tab-btn.active::before {
+        width: 2px;
+        height: 50%;
     }
 
     .main-content {
