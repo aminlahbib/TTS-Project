@@ -120,7 +120,7 @@ async function init() {
         
         // Hide loading indicator and show app
         if (loadingIndicator) loadingIndicator.style.display = 'none';
-        if (appContainer) appContainer.style.display = 'block';
+        if (appContainer) appContainer.style.display = 'flex';
         
         console.log('[Main] Frontend initialized successfully');
         updateLoadingStatus('Ready!');
