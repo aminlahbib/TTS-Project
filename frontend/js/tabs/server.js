@@ -180,8 +180,8 @@ export function initServerTab(elements) {
     // Initialize
     setupEventListeners();
     
-    // Check server status on tab initialization
-    checkServerStatus();
+    // Don't check server status here - it's already checked in main.js
+    // Only check when tab is activated or when explicitly requested
     
     return {
         checkServerStatus,

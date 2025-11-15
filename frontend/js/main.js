@@ -38,69 +38,119 @@ function setCurrentConversationId(id) {
 
 // Initialize the application
 async function init() {
-    console.log('[Main] TTS Project Frontend Initializing...');
-    console.log('[Main] Window location:', {
-        href: window.location.href,
-        hostname: window.location.hostname,
-        port: window.location.port,
-        protocol: window.location.protocol
-    });
-    
-    // Initialize DOM elements
-    elements = initElements();
-    console.log('[Main] DOM elements initialized:', Object.keys(elements).length, 'elements');
-    
-    // Set up tabs
-    setupTabs((tabName, tabContent) => {
-        if (tabName === 'chat') {
-            setTimeout(() => {
-                scrollChatToBottom(elements.chatMessages);
-            }, 100);
+    try {
+        // Show loading indicator
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const loadingStatus = document.getElementById('loadingStatus');
+        const appContainer = document.getElementById('appContainer');
+        
+        function updateLoadingStatus(text) {
+            if (loadingStatus) loadingStatus.textContent = text;
+            console.log('[Main]', text);
         }
-        if (tabName === 'server') {
-            // Server tab will check status on initialization
+        
+        updateLoadingStatus('Starting initialization...');
+        console.log('[Main] TTS Project Frontend Initializing...');
+        console.log('[Main] Window location:', {
+            href: window.location.href,
+            hostname: window.location.hostname,
+            port: window.location.port,
+            protocol: window.location.protocol
+        });
+        
+        updateLoadingStatus('Initializing DOM elements...');
+        // Initialize DOM elements
+        elements = initElements();
+        console.log('[Main] DOM elements initialized:', Object.keys(elements).length, 'elements');
+        
+        updateLoadingStatus('Setting up tabs...');
+        // Set up tabs
+        setupTabs((tabName, tabContent) => {
+            if (tabName === 'chat') {
+                setTimeout(() => {
+                    scrollChatToBottom(elements.chatMessages);
+                }, 100);
+            }
+            if (tabName === 'server') {
+                // Server tab will check status on initialization
+            }
+        });
+        
+        updateLoadingStatus('Checking server status...');
+        // Check server status on load
+        await checkServerStatus();
+        
+        updateLoadingStatus('Loading voices...');
+        // Load voices dynamically (must be before tab initialization for voiceDetails)
+        await loadVoices();
+        
+        // Set up custom audio player
+        setupCustomAudioPlayer(elements);
+        
+        // Initialize tab modules
+        const ttsState = {
+            setCurrentAudioBlob,
+            voiceDetails
+        };
+        initTtsTab(elements, ttsState);
+        
+        // Stream state with getters/setters for reactivity
+        const streamState = {
+            get isStreaming() { return isStreaming; },
+            set isStreaming(value) { isStreaming = value; },
+            get currentWebSocket() { return currentWebSocket; },
+            set currentWebSocket(value) { currentWebSocket = value; },
+            setCurrentStreamAudioBlob
+        };
+        initStreamTab(elements, streamState);
+        
+        // Chat state with getters/setters for reactivity
+        const chatState = {
+            get currentConversationId() { return currentConversationId; },
+            set currentConversationId(value) { currentConversationId = value; },
+            setCurrentConversationId
+        };
+        initChatTab(elements, chatState);
+        
+        const serverTab = initServerTab(elements);
+        
+        updateLoadingStatus('Setting up handlers...');
+        // Set up download button handlers
+        setupDownloadHandlers();
+        
+        // Hide loading indicator and show app
+        if (loadingIndicator) loadingIndicator.style.display = 'none';
+        if (appContainer) appContainer.style.display = 'block';
+        
+        console.log('[Main] Frontend initialized successfully');
+        updateLoadingStatus('Ready!');
+    } catch (error) {
+        console.error('[Main] Initialization error:', error);
+        console.error('[Main] Error stack:', error.stack);
+        console.error('[Main] Error name:', error.name);
+        console.error('[Main] Error message:', error.message);
+        
+        // Try to update status if elements are available
+        try {
+            if (elements && elements.serverStatus) {
+                updateServerStatus(elements.serverStatus, 'disconnected', 'Initialization Failed');
+            }
+        } catch (e) {
+            console.error('[Main] Failed to update server status:', e);
         }
-    });
-    
-    // Check server status on load
-    await checkServerStatus();
-    
-    // Load voices dynamically
-    await loadVoices();
-    
-    // Set up custom audio player
-    setupCustomAudioPlayer(elements);
-    
-    // Initialize tab modules
-    const ttsState = {
-        setCurrentAudioBlob
-    };
-    initTtsTab(elements, ttsState);
-    
-    // Stream state with getters/setters for reactivity
-    const streamState = {
-        get isStreaming() { return isStreaming; },
-        set isStreaming(value) { isStreaming = value; },
-        get currentWebSocket() { return currentWebSocket; },
-        set currentWebSocket(value) { currentWebSocket = value; },
-        setCurrentStreamAudioBlob
-    };
-    initStreamTab(elements, streamState);
-    
-    // Chat state with getters/setters for reactivity
-    const chatState = {
-        get currentConversationId() { return currentConversationId; },
-        set currentConversationId(value) { currentConversationId = value; },
-        setCurrentConversationId
-    };
-    initChatTab(elements, chatState);
-    
-    const serverTab = initServerTab(elements);
-    
-    // Set up download button handlers
-    setupDownloadHandlers();
-    
-    console.log('[Main] Frontend initialized successfully');
+        
+        // Try to show toast, but don't fail if it doesn't work
+        try {
+            if (typeof showToast === 'function') {
+                showToast('error', `Initialization failed: ${error.message}`);
+            } else {
+                alert(`Initialization failed: ${error.message}\n\nCheck console for details.`);
+            }
+        } catch (e) {
+            console.error('[Main] Failed to show toast:', e);
+            alert(`Initialization failed: ${error.message}\n\nCheck console for details.`);
+        }
+    }
 }
 
 // Load voices from API
@@ -167,7 +217,10 @@ async function checkServerStatus() {
         if (elements.serverStatus) {
             updateServerStatus(elements.serverStatus, 'connected', 'Server Connected');
         }
-        showToast('success', 'Server connected');
+        // Only show toast if elements are initialized
+        if (elements && elements.toastContainer) {
+            showToast('success', 'Server connected');
+        }
     } catch (error) {
         console.error('[Main] Server Status Error:', {
             name: error.name,
@@ -177,7 +230,12 @@ async function checkServerStatus() {
         if (elements.serverStatus) {
             updateServerStatus(elements.serverStatus, 'disconnected', 'Server Disconnected');
         }
-        showToast('error', `Server connection failed: ${error.message}`);
+        // Only show toast if elements are initialized
+        if (elements && elements.toastContainer) {
+            showToast('error', `Server connection failed: ${error.message}`);
+        } else {
+            console.error('Server connection failed:', error.message);
+        }
     }
 }
 

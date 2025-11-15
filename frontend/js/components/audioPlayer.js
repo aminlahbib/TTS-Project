@@ -4,7 +4,8 @@ import { CONFIG } from '../config.js';
 import { formatTime } from '../utils/format.js';
 import { base64ToBlob, generateWaveform } from '../utils/audio.js';
 
-const { AUDIO } = CONFIG;
+// Access AUDIO safely (it's a regular property, not a getter)
+const AUDIO = CONFIG?.AUDIO || { DEFAULT_SPEED: 1.0 };
 
 /**
  * Setup custom audio player

@@ -11,7 +11,10 @@
     <link rel="stylesheet" href="css/server.css">
 </head>
 <body>
-<div class="app-container">
+<div id="loadingIndicator" style="position: fixed; top: 0; left: 0; right: 0; background: #3b82f6; color: white; padding: 10px; text-align: center; z-index: 10000; font-family: monospace;">
+    Loading TTS Application... <span id="loadingStatus">Initializing...</span>
+</div>
+<div class="app-container" style="display: none;" id="appContainer">
     <aside class="sidebar">
         <h2 class="logo">TTS</h2>
         <nav class="nav">
@@ -273,6 +276,26 @@
         </section>
     </main>
 </div>
-<script type="module" src="js/main.js"></script>
+    <script type="module" src="js/main.js"></script>
+    <script>
+        // Global error handler for debugging (non-blocking)
+        window.addEventListener('error', (event) => {
+            console.error('[Global Error Handler]', {
+                message: event.message,
+                filename: event.filename,
+                lineno: event.lineno,
+                colno: event.colno,
+                error: event.error
+            });
+        }, true);
+        
+        // Handle unhandled promise rejections
+        window.addEventListener('unhandledrejection', (event) => {
+            console.error('[Unhandled Promise Rejection]', {
+                reason: event.reason,
+                promise: event.promise
+            });
+        });
+    </script>
 </body>
 </html>

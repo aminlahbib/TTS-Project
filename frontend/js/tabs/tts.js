@@ -7,14 +7,33 @@ import { showToast } from '../utils/toast.js';
 import { base64ToBlob } from '../utils/audio.js';
 import { setupAudioPlayer } from '../components/audioPlayer.js';
 import { displaySpectrogram } from '../components/spectrogram.js';
+import { populateSpeakerSelect } from '../utils/voices.js';
 
 /**
  * Initialize TTS tab
  * @param {Object} elements - DOM elements
- * @param {Function} setCurrentAudioBlob - Function to store audio blob
+ * @param {Object} state - State object with setCurrentAudioBlob and voiceDetails
  * @returns {Object} Tab handlers and cleanup functions
  */
-export function initTtsTab(elements, setCurrentAudioBlob) {
+export function initTtsTab(elements, state) {
+    const { setCurrentAudioBlob, voiceDetails = [] } = state;
+    
+    // Handle language change to populate speaker select
+    function handleLanguageChange() {
+        if (!elements.ttsLanguage || !elements.speakerGroup) return;
+        
+        const language = elements.ttsLanguage.value;
+        const voiceDetail = voiceDetails.find(v => v.key === language);
+        
+        if (voiceDetail && voiceDetail.speaker !== null) {
+            // Show speaker selection if available
+            populateSpeakerSelect(elements.ttsSpeaker, language, voiceDetails);
+            elements.speakerGroup.style.display = 'block';
+        } else {
+            elements.speakerGroup.style.display = 'none';
+        }
+    }
+    
     // Set up character counter
     function setupCharacterCounter() {
         if (!elements.ttsText || !elements.ttsCharCount) return;
@@ -60,6 +79,11 @@ export function initTtsTab(elements, setCurrentAudioBlob) {
                 setCurrentAudioBlob(audioBlob);
             }
             
+            // Show download button
+            if (elements.downloadTtsBtn) {
+                elements.downloadTtsBtn.style.display = 'block';
+            }
+            
             // Set up custom audio player
             await setupAudioPlayer(elements, data.audio_base64);
             
@@ -99,11 +123,9 @@ export function initTtsTab(elements, setCurrentAudioBlob) {
             elements.ttsForm.addEventListener('submit', handleTtsSubmit);
         }
         
-        // Download button
-        if (elements.downloadTtsBtn) {
-            elements.downloadTtsBtn.addEventListener('click', () => {
-                // Download handled by audioPlayer component
-            });
+        // Language change handler for speaker selection
+        if (elements.ttsLanguage) {
+            elements.ttsLanguage.addEventListener('change', handleLanguageChange);
         }
     }
     
@@ -113,6 +135,7 @@ export function initTtsTab(elements, setCurrentAudioBlob) {
     
     return {
         handleTtsSubmit,
+        handleLanguageChange,
         setupCharacterCounter
     };
 }
