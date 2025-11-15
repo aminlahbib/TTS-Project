@@ -26,10 +26,17 @@ let streamSpectrogramState = null;
 
 // Initialize the application
 async function init() {
-    console.log('TTS Project Frontend Initializing...');
+    console.log('[Main] TTS Project Frontend Initializing...');
+    console.log('[Main] Window location:', {
+        href: window.location.href,
+        hostname: window.location.hostname,
+        port: window.location.port,
+        protocol: window.location.protocol
+    });
     
     // Initialize DOM elements
     elements = initElements();
+    console.log('[Main] DOM elements initialized:', Object.keys(elements).length, 'elements');
     
     // Set up tabs
     setupTabs((tabName, tabContent) => {
@@ -50,13 +57,21 @@ async function init() {
     setupEventListeners();
     
     // Set up streaming handler
-    setupStreamingHandler();
+    if (elements.streamForm) {
+        elements.streamForm.addEventListener('submit', handleStreamSubmit);
+    }
     
     // Set up character counter
     setupCharacterCounter();
     
     // Set up custom audio player
     setupCustomAudioPlayer(elements);
+    
+    // Setup voice input for chat tab (simplified - just hide button if not supported)
+    setupVoiceInput();
+    
+    // Setup voice mode toggle
+    setupVoiceModeToggle();
     
     console.log('Frontend initialized successfully');
 }
@@ -86,7 +101,7 @@ function setupEventListeners() {
         elements.ttsForm.addEventListener('submit', handleTtsSubmit);
     }
     
-    // Streaming Form Handler - will be set up after elements are initialized
+    // Streaming Form Handler - set up in init() after elements are initialized
     
     // Chat Form Handler
     if (elements.chatForm) {
@@ -262,10 +277,9 @@ async function handleStreamSubmit(e) {
         elements.streamSpectrogramCanvas,
         elements.streamSpectrogram
     );
-    if (streamSpectrogramState) {
-        streamSpectrogramState.canvas = elements.streamSpectrogramCanvas;
+    if (streamSpectrogramState && elements.streamSpectrogram) {
+        elements.streamSpectrogram.classList.remove('hidden');
     }
-    elements.streamSpectrogram.classList.remove('hidden');
     
     try {
         const cleanup = await startWebSocketStream(text, language, {
@@ -368,20 +382,26 @@ async function handleChatSubmit(e) {
 
 // Server Status Functions
 async function checkServerStatus() {
+    console.log('[Main] Checking server status...');
     try {
-        await checkServerHealth();
+        const healthResponse = await checkServerHealth();
+        console.log('[Main] Server health check passed:', healthResponse);
         updateServerStatus(elements.serverStatus, 'connected', 'Server Connected');
         showStatus(elements.serverInfo, 'success', 'Server is running and healthy!');
         showToast(elements.toastContainer, 'success', 'Server connected');
     } catch (error) {
-        console.error('Server Status Error:', error);
+        console.error('[Main] Server Status Error:', {
+            name: error.name,
+            message: error.message,
+            stack: error.stack
+        });
         updateServerStatus(elements.serverStatus, 'disconnected', 'Server Disconnected');
         showStatus(elements.serverInfo, 'error', `Server is not responding: ${error.message}`);
-        showToast(elements.toastContainer, 'error', 'Server connection failed');
+        showToast(elements.toastContainer, 'error', `Server connection failed: ${error.message}`);
     }
 }
 
-async function getServerMetrics() {
+async function displayServerMetrics() {
     if (elements.serverMetrics) {
         elements.serverMetrics.classList.remove('hidden');
     }
@@ -451,7 +471,7 @@ async function getServerMetrics() {
     }
 }
 
-async function getVoices() {
+async function displayVoices() {
     showStatus(elements.serverInfo, 'info', 'Fetching voices...');
     
     try {
@@ -484,10 +504,44 @@ async function getVoicesDetail() {
     }
 }
 
+// Voice input setup (simplified)
+function setupVoiceInput() {
+    // Check for speech recognition support
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+        if (elements.chatMicBtn) {
+            elements.chatMicBtn.style.display = 'none';
+        }
+        console.warn('Speech recognition not supported in this browser');
+        return;
+    }
+    // Full implementation would go here - for now just ensure button is visible
+}
+
+// Voice mode toggle setup
+function setupVoiceModeToggle() {
+    if (elements.voiceModeToggleBtn) {
+        elements.voiceModeToggleBtn.addEventListener('click', () => {
+            if (elements.textInputWrapper && elements.voiceModeWrapper) {
+                elements.textInputWrapper.classList.add('hidden');
+                elements.voiceModeWrapper.classList.remove('hidden');
+            }
+        });
+    }
+    
+    if (elements.exitVoiceModeBtn) {
+        elements.exitVoiceModeBtn.addEventListener('click', () => {
+            if (elements.textInputWrapper && elements.voiceModeWrapper) {
+                elements.textInputWrapper.classList.remove('hidden');
+                elements.voiceModeWrapper.classList.add('hidden');
+            }
+        });
+    }
+}
+
 // Global Functions (for HTML onclick handlers)
 window.checkServerStatus = checkServerStatus;
 window.getServerMetrics = displayServerMetrics;
-window.getVoices = getVoices;
+window.getVoices = displayVoices;
 window.getVoicesDetail = getVoicesDetail;
 
 // Initialize when DOM is loaded

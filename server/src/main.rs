@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, timeout::TimeoutLayer, trace::TraceLayer};
-use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
+use tower_governor::{governor::GovernorConfigBuilder, key_extractor::GlobalKeyExtractor, GovernorLayer};
 use tracing::{error, info, warn};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -151,29 +151,35 @@ async fn async_main() -> anyhow::Result<()> {
             warn!("CORS_ALLOWED_ORIGINS is empty, falling back to permissive CORS");
             CorsLayer::new()
                 .allow_origin(tower_http::cors::Any)
-                .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
+                .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::OPTIONS])
                 .allow_headers(tower_http::cors::Any)
+                .allow_credentials(false)
         } else {
             info!("CORS configured for {} origin(s)", origins.len());
             CorsLayer::new()
                 .allow_origin(tower_http::cors::AllowOrigin::list(origins))
-                .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
+                .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::OPTIONS])
                 .allow_headers(tower_http::cors::Any)
+                .allow_credentials(false)
         }
     } else {
         // Development: Allow all origins (with warning)
         warn!("CORS_ALLOWED_ORIGINS not set, allowing all origins (development mode)");
         CorsLayer::new()
             .allow_origin(tower_http::cors::Any)
-            .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
+            .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::OPTIONS])
             .allow_headers(tower_http::cors::Any)
+            .allow_credentials(false)
     };
 
     // Rate limiting configuration
+    // Using GlobalKeyExtractor to rate limit globally (all requests share the same limit)
+    // This works better in Docker/proxy environments where IP extraction can be problematic
     let governor_conf = Arc::new(
         GovernorConfigBuilder::default()
             .per_second((config.rate_limit_per_minute / 60) as u64) // Convert per-minute to per-second
             .burst_size(config.rate_limit_per_minute as u32)
+            .key_extractor(GlobalKeyExtractor)
             .finish()
             .unwrap(),
     );
@@ -195,8 +201,8 @@ async fn async_main() -> anyhow::Result<()> {
         response
     }
     
-    // Note: GovernorLayer with axum feature should automatically handle errors
-    // If compilation fails, we may need to configure it differently
+    // Note: GovernorLayer needs a key extractor to identify requests for rate limiting
+    // The key extractor is configured in the GovernorConfigBuilder above
     let middleware_stack = ServiceBuilder::new()
         .layer(TraceLayer::new_for_http())
         .layer(GovernorLayer::new(governor_conf))
@@ -213,7 +219,7 @@ async fn async_main() -> anyhow::Result<()> {
         .route("/tts", post(tts_endpoint))
         .route("/chat", post(chat_endpoint))
         .route("/voice-chat", post(voice_chat_endpoint))
-        .route("/stream/:lang/:text", get(stream_ws));
+        .route("/stream/{lang}/{text}", get(stream_ws));
     
     // Metrics endpoint - consider adding authentication in production
     let metrics_api = Router::new()

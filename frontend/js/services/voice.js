@@ -5,23 +5,14 @@ import { ttsLangToSpeechLang } from '../utils/format.js';
 
 const { VAD } = CONFIG;
 
-/**
- * Check if speech recognition is supported
- */
 export function isSpeechRecognitionSupported() {
     return 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
 }
 
-/**
- * Get SpeechRecognition constructor
- */
 export function getSpeechRecognition() {
     return window.SpeechRecognition || window.webkitSpeechRecognition;
 }
 
-/**
- * Create a speech recognition instance
- */
 export function createSpeechRecognition(options = {}) {
     if (!isSpeechRecognitionSupported()) {
         throw new Error('Speech recognition not supported');
@@ -38,9 +29,6 @@ export function createSpeechRecognition(options = {}) {
     return recognition;
 }
 
-/**
- * Calculate audio level from analyser node (for VAD)
- */
 export function calculateAudioLevel(analyser, dataArray) {
     if (!analyser || !dataArray) return 0;
     
@@ -63,9 +51,6 @@ export function calculateAudioLevel(analyser, dataArray) {
     return rms;
 }
 
-/**
- * Create VAD (Voice Activity Detection) checker
- */
 export function createVADChecker(analyser, dataArray, callbacks) {
     let vadState = {
         lastVoiceTime: null,
@@ -137,9 +122,7 @@ export function createVADChecker(analyser, dataArray, callbacks) {
     };
 }
 
-/**
- * Request microphone access with error handling
- */
+
 export async function requestMicrophoneAccess(callbacks = {}) {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         const error = new Error('Microphone access is not supported in this browser.');

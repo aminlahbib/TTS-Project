@@ -4,9 +4,15 @@ import { CONFIG } from '../config.js';
 
 const { API_BASE, REQUEST } = CONFIG;
 
-/**
- * Make a fetch request with error handling
- */
+// Log API configuration on module load
+console.log('[API Service] Initialized with:', {
+    API_BASE,
+    REQUEST_TIMEOUT: REQUEST.TIMEOUT,
+    REQUEST_LLM_TIMEOUT: REQUEST.LLM_TIMEOUT,
+    REQUEST_TTS_TIMEOUT: REQUEST.TTS_TIMEOUT
+});
+
+
 async function fetchWithErrorHandling(url, options = {}) {
     try {
         const response = await fetch(url, options);
@@ -28,17 +34,56 @@ async function fetchWithErrorHandling(url, options = {}) {
     }
 }
 
-/**
- * Check server health
- */
+
 export async function checkServerHealth() {
-    const response = await fetchWithErrorHandling(`${API_BASE}/health`);
-    return await response.text();
+    const url = `${API_BASE}/health`;
+    console.log('[API] Checking server health at:', url);
+    
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Accept': 'text/plain',
+            },
+        });
+        
+        console.log('[API] Health check response:', {
+            status: response.status,
+            statusText: response.statusText,
+            ok: response.ok,
+            headers: Object.fromEntries(response.headers.entries())
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text().catch(() => 'No error details');
+            console.error('[API] Health check failed:', {
+                status: response.status,
+                statusText: response.statusText,
+                errorText
+            });
+            throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
+        }
+        
+        const text = await response.text();
+        console.log('[API] Health check successful:', text);
+        return text;
+    } catch (error) {
+        console.error('[API] Health check error:', {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+            url
+        });
+        
+        // Handle network errors specifically
+        if (error.name === 'TypeError' && error.message.includes('fetch')) {
+            throw new Error(`Cannot connect to server at ${API_BASE}. Is the server running?`);
+        }
+        throw error;
+    }
 }
 
-/**
- * Get list of available voices
- */
+
 export async function getVoices() {
     const response = await fetchWithErrorHandling(`${API_BASE}/voices`);
     return await response.json();
