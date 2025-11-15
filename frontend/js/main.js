@@ -72,11 +72,25 @@ async function init() {
             await new Promise(resolve => requestAnimationFrame(resolve));
             elements = initElements();
             
+            // Cleanup server tab when switching away from it
+            const previousTab = document.querySelector('.tab-content.active[data-tab]');
+            if (previousTab && previousTab.getAttribute('data-tab') === 'server' && tabName !== 'server' && window.serverTabCleanup) {
+                window.serverTabCleanup();
+                window.serverTabCleanup = null;
+            }
+            
             // Only initialize if not already initialized
             if (initializedTabs.has(tabName)) {
                 // Still populate voices even if tab is already initialized
                 // (in case voices were loaded after tab initialization)
                 populateVoicesInSelects();
+                
+                // Re-initialize audio player for TTS tab when returning to it
+                if (tabName === 'tts') {
+                    setupCustomAudioPlayer(elements);
+                    // Resume AudioContext if it exists and is suspended
+                    resumeTtsAudioContext(elements);
+                }
                 return;
             }
             
@@ -94,12 +108,6 @@ async function init() {
                 setTimeout(() => {
                     scrollChatToBottom(elements.chatMessages);
                 }, 100);
-            }
-            // Cleanup server tab when switching away from it
-            const previousTab = document.querySelector('.tab-content.active[data-tab]');
-            if (previousTab && previousTab.getAttribute('data-tab') === 'server' && tabName !== 'server' && window.serverTabCleanup) {
-                window.serverTabCleanup();
-                window.serverTabCleanup = null;
             }
             
             if (tabName === 'server') {
@@ -312,6 +320,30 @@ async function checkServerStatus() {
         }
     }
 }
+
+// Resume TTS AudioContext if suspended
+function resumeTtsAudioContext(elements) {
+    if (elements.ttsAudio && elements.ttsAudio._audioContext) {
+        const audioContext = elements.ttsAudio._audioContext;
+        if (audioContext.state === 'suspended') {
+            console.log('[Main] Resuming suspended AudioContext');
+            audioContext.resume().catch(err => {
+                console.warn('[Main] Error resuming AudioContext:', err);
+            });
+        }
+    }
+}
+
+// Handle visibility change to resume AudioContext when tab becomes visible
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && elements && elements.ttsAudio) {
+        // Check if TTS tab is active
+        const ttsTab = document.querySelector('.tab-content.active[data-tab="tts"]');
+        if (ttsTab) {
+            resumeTtsAudioContext(elements);
+        }
+    }
+});
 
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', init);
