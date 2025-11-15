@@ -2,6 +2,16 @@
 
 High-performance multilingual Text-to-Speech and Chat server built with Rust, featuring Piper TTS engine integration and OpenAI/Ollama LLM support.
 
+## 📚 Documentation
+
+**Complete documentation is available in the [`docs/`](docs/) folder.**
+
+- **[Documentation Index](docs/README.md)** - Overview of all documentation
+- **[Quick Start Guide](QUICKSTART.md)** - Get started quickly
+- **[Architecture](docs/ARCHITECTURE.md)** - System architecture and design
+- **[Tabs Analysis](docs/PROJECT_TABS_ANALYSIS.md)** - Detailed feature analysis
+- **[Testing Guide](docs/TESTING_CHECKLIST.md)** - Testing procedures
+
 ## Quick Start
 
 **Docker (Recommended):**
@@ -96,4 +106,5 @@ docker run -p 8082:80 tts-frontend
 
 - **[QUICKSTART.md](QUICKSTART.md)** - Setup guide
 - **[tests/README.md](tests/README.md)** - Testing docs
-- **[frontend/FRONTEND_GUIDE.md](frontend/docs/FRONTEND_GUIDE.md)** - Frontend setup
+- **[Frontend Guide](docs/FRONTEND_GUIDE.md)** - Frontend setup
+- **[Complete Documentation Index](docs/README.md)** - All documentation files

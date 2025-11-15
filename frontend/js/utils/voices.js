@@ -33,3 +33,28 @@ export function populateLanguageSelects(selects, voices, defaultLang = null) {
     });
 }
 
+/**
+ * Populate speaker select for a given language
+ */
+export function populateSpeakerSelect(speakerSelect, language, voiceDetails) {
+    if (!speakerSelect || !language || !voiceDetails) return;
+    
+    const voiceDetail = voiceDetails.find(v => v.key === language);
+    if (!voiceDetail || voiceDetail.speaker === null) {
+        speakerSelect.innerHTML = '<option value="">Default</option>';
+        return;
+    }
+    
+    // Clear existing options
+    speakerSelect.innerHTML = '<option value="">Default</option>';
+    
+    // Add speaker options (assuming speaker is a number indicating number of speakers)
+    const numSpeakers = typeof voiceDetail.speaker === 'number' ? voiceDetail.speaker : 1;
+    for (let i = 0; i < numSpeakers; i++) {
+        const option = document.createElement('option');
+        option.value = i.toString();
+        option.textContent = `Speaker ${i + 1}`;
+        speakerSelect.appendChild(option);
+    }
+}
+

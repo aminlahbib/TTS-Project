@@ -3,12 +3,12 @@
 import { CONFIG } from '../config.js';
 import { convertF32ArrayToWavBase64, base64ToBlob, generateWaveform } from '../utils/audio.js';
 
-const { WS_BASE, STREAMING } = CONFIG;
+const { STREAMING } = CONFIG;
 
 // Start WebSocket stream for TTS
 export function startWebSocketStream(text, language, callbacks) {
     const encodedText = encodeURIComponent(text);
-    const wsUrl = `${WS_BASE}/stream/${language}/${encodedText}`;
+    const wsUrl = `${CONFIG.WS_BASE}/stream/${language}/${encodedText}`;
     
     let ws = null;
     let cleanup = null;

@@ -2,15 +2,37 @@
 
 import { CONFIG } from '../config.js';
 
-const { API_BASE, REQUEST } = CONFIG;
+// Ensure CONFIG is available
+if (!CONFIG) {
+    console.error('[API Service] CONFIG is not available!');
+    throw new Error('CONFIG is not available');
+}
 
-// Log API configuration on module load
-console.log('[API Service] Initialized with:', {
-    API_BASE,
-    REQUEST_TIMEOUT: REQUEST.TIMEOUT,
-    REQUEST_LLM_TIMEOUT: REQUEST.LLM_TIMEOUT,
-    REQUEST_TTS_TIMEOUT: REQUEST.TTS_TIMEOUT
-});
+const { REQUEST } = CONFIG;
+
+// Get API_BASE lazily (will be computed when first accessed)
+function getApiBase() {
+    try {
+        return CONFIG.API_BASE;
+    } catch (error) {
+        console.error('[API Service] Error getting API_BASE:', error);
+        return 'http://localhost:8085'; // Fallback
+    }
+}
+
+// Log API configuration on first use (not at module load)
+let configLogged = false;
+function logApiConfig() {
+    if (!configLogged) {
+        console.log('[API Service] Initialized with:', {
+            API_BASE: getApiBase(),
+            REQUEST_TIMEOUT: REQUEST?.TIMEOUT,
+            REQUEST_LLM_TIMEOUT: REQUEST?.LLM_TIMEOUT,
+            REQUEST_TTS_TIMEOUT: REQUEST?.TTS_TIMEOUT
+        });
+        configLogged = true;
+    }
+}
 
 
 async function fetchWithErrorHandling(url, options = {}) {
@@ -36,7 +58,8 @@ async function fetchWithErrorHandling(url, options = {}) {
 
 
 export async function checkServerHealth() {
-    const url = `${API_BASE}/health`;
+    logApiConfig();
+    const url = `${getApiBase()}/health`;
     console.log('[API] Checking server health at:', url);
     
     try {
@@ -77,7 +100,7 @@ export async function checkServerHealth() {
         
         // Handle network errors specifically
         if (error.name === 'TypeError' && error.message.includes('fetch')) {
-            throw new Error(`Cannot connect to server at ${API_BASE}. Is the server running?`);
+            throw new Error(`Cannot connect to server at ${getApiBase()}. Is the server running?`);
         }
         throw error;
     }
@@ -85,7 +108,7 @@ export async function checkServerHealth() {
 
 
 export async function getVoices() {
-    const response = await fetchWithErrorHandling(`${API_BASE}/voices`);
+    const response = await fetchWithErrorHandling(`${getApiBase()}/voices`);
     return await response.json();
 }
 
@@ -93,7 +116,7 @@ export async function getVoices() {
  * Get detailed voice information
  */
 export async function getVoiceDetails() {
-    const response = await fetchWithErrorHandling(`${API_BASE}/voices/detail`);
+    const response = await fetchWithErrorHandling(`${getApiBase()}/voices/detail`);
     return await response.json();
 }
 
@@ -106,7 +129,7 @@ export async function generateTTS(text, language, speaker = null) {
         requestBody.speaker = speaker;
     }
     
-    const response = await fetchWithErrorHandling(`${API_BASE}/tts`, {
+    const response = await fetchWithErrorHandling(`${getApiBase()}/tts`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -127,7 +150,7 @@ export async function sendChatMessage(message, conversationId = null) {
         requestBody.conversation_id = conversationId;
     }
     
-    const response = await fetchWithErrorHandling(`${API_BASE}/chat`, {
+    const response = await fetchWithErrorHandling(`${getApiBase()}/chat`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -148,7 +171,7 @@ export async function sendVoiceChatMessage(message, language, conversationId = n
         requestBody.conversation_id = conversationId;
     }
     
-    const response = await fetchWithErrorHandling(`${API_BASE}/voice-chat`, {
+    const response = await fetchWithErrorHandling(`${getApiBase()}/voice-chat`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -164,7 +187,7 @@ export async function sendVoiceChatMessage(message, language, conversationId = n
  * Get server metrics
  */
 export async function getServerMetrics() {
-    const response = await fetchWithErrorHandling(`${API_BASE}/metrics`);
+    const response = await fetchWithErrorHandling(`${getApiBase()}/metrics`);
     return await response.json();
 }
 

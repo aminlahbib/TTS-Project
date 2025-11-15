@@ -5,40 +5,58 @@
  * Handles localhost, Docker, and production environments
  */
 function getApiBase() {
-    const hostname = window.location.hostname;
-    const protocol = window.location.protocol;
-    const port = window.location.port;
-    
-    // Backend API port (different from frontend port)
-    const API_PORT = '8085';
-    
-    // Debug logging
-    console.log('[Config] Determining API base URL:', {
-        hostname,
-        protocol,
-        port,
-        fullLocation: window.location.href
-    });
-    
-    // Check if we're accessing via Docker (common Docker hostnames)
-    // In Docker, frontend and backend are on same host but different ports
-    const isDocker = hostname === 'localhost' || 
-                     hostname === '127.0.0.1' || 
-                     hostname === '' ||
-                     hostname.includes('.local') ||
-                     port === '8082'; // Frontend nginx port
-    
-    let apiBase;
-    if (isDocker) {
-        // Development/Docker: backend is on same host, different port
-        apiBase = `${protocol}//${hostname}:${API_PORT}`;
-    } else {
-        // Production: use same protocol and hostname, but backend port (8085)
-        apiBase = `${protocol}//${hostname}:${API_PORT}`;
+    try {
+        // Ensure window.location is available
+        if (typeof window === 'undefined' || !window.location) {
+            console.error('[Config] window.location is not available');
+            // Fallback for server-side rendering or testing
+            return 'http://localhost:8085';
+        }
+        
+        const hostname = window.location.hostname;
+        const protocol = window.location.protocol;
+        const port = window.location.port;
+        
+        // Backend API port (different from frontend port)
+        const API_PORT = '8085';
+        
+        // Debug logging
+        console.log('[Config] Determining API base URL:', {
+            hostname,
+            protocol,
+            port,
+            fullLocation: window.location.href
+        });
+        
+        // Check if we're accessing via Docker (common Docker hostnames)
+        // In Docker, frontend and backend are on same host but different ports
+        const isDocker = hostname === 'localhost' || 
+                         hostname === '127.0.0.1' || 
+                         hostname === '' ||
+                         hostname.includes('.local') ||
+                         port === '8082'; // Frontend nginx port
+        
+        let apiBase;
+        if (isDocker) {
+            // Development/Docker: backend is on same host, different port
+            apiBase = `${protocol}//${hostname}:${API_PORT}`;
+        } else {
+            // Production: use same protocol and hostname, but backend port (8085)
+            apiBase = `${protocol}//${hostname}:${API_PORT}`;
+        }
+        
+        // Validate the URL
+        if (!apiBase || apiBase.includes('undefined') || apiBase.includes('null')) {
+            console.error('[Config] Invalid API base URL computed:', apiBase);
+            return 'http://localhost:8085'; // Fallback
+        }
+        
+        console.log('[Config] API Base URL:', apiBase);
+        return apiBase;
+    } catch (error) {
+        console.error('[Config] Error computing API base URL:', error);
+        return 'http://localhost:8085'; // Fallback
     }
-    
-    console.log('[Config] API Base URL:', apiBase);
-    return apiBase;
 }
 
 /**
@@ -46,15 +64,50 @@ function getApiBase() {
  * Automatically uses ws:// or wss:// based on current protocol
  */
 function getWebSocketBase() {
-    const apiBase = getApiBase();
-    // Replace http:// with ws:// or https:// with wss://
-    return apiBase.replace(/^http/, 'ws');
+    try {
+        const apiBase = getApiBase();
+        // Replace http:// with ws:// or https:// with wss://
+        const wsBase = apiBase.replace(/^http/, 'ws');
+        console.log('[Config] WebSocket Base URL:', wsBase);
+        return wsBase;
+    } catch (error) {
+        console.error('[Config] Error computing WebSocket base URL:', error);
+        return 'ws://localhost:8085'; // Fallback
+    }
+}
+
+// Lazy initialization to ensure window.location is available
+let _apiBase = null;
+let _wsBase = null;
+
+function getApiBaseLazy() {
+    try {
+        if (!_apiBase) {
+            _apiBase = getApiBase();
+        }
+        return _apiBase;
+    } catch (error) {
+        console.error('[Config] Error in getApiBaseLazy:', error);
+        return 'http://localhost:8085'; // Fallback
+    }
+}
+
+function getWebSocketBaseLazy() {
+    try {
+        if (!_wsBase) {
+            _wsBase = getWebSocketBase();
+        }
+        return _wsBase;
+    } catch (error) {
+        console.error('[Config] Error in getWebSocketBaseLazy:', error);
+        return 'ws://localhost:8085'; // Fallback
+    }
 }
 
 export const CONFIG = {
-    // API Configuration
-    API_BASE: getApiBase(),
-    WS_BASE: getWebSocketBase(),
+    // API Configuration (lazy getters)
+    get API_BASE() { return getApiBaseLazy(); },
+    get WS_BASE() { return getWebSocketBaseLazy(); },
     
     // Streaming Configuration
     STREAMING: {
