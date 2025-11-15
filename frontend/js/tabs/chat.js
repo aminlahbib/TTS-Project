@@ -159,7 +159,7 @@ export function initChatTab(elements, state) {
         }
     }
     
-    // Voice Mode State
+    // Dictating Mode State
     let voiceModeState = {
         isActive: false,
         isRecording: false,
@@ -329,7 +329,7 @@ export function initChatTab(elements, state) {
                         // Voice detected
                     },
                     onSilenceDetected: (silenceDuration, audioLevel) => {
-                        console.log('[Voice Mode] Silence detected, stopping recording', {
+                        console.log('[Dictating Mode] Silence detected, stopping recording', {
                             silenceDuration,
                             audioLevel,
                             transcript: voiceModeState.transcript
@@ -359,7 +359,7 @@ export function initChatTab(elements, state) {
                         const transcript = event.results[i][0].transcript;
                         if (event.results[i].isFinal) {
                             finalTranscript += transcript + ' ';
-                            console.log('[Voice Mode] Final transcript:', transcript);
+                            console.log('[Dictating Mode] Final transcript:', transcript);
                         } else {
                             interimTranscript += transcript;
                         }
@@ -372,12 +372,12 @@ export function initChatTab(elements, state) {
                 };
                 
                 voiceModeState.speechRecognition.onerror = (event) => {
-                    console.error('[Voice Mode] Speech recognition error:', event.error);
+                    console.error('[Dictating Mode] Speech recognition error:', event.error);
                     if (event.error === 'no-speech') {
                         // This is normal, just continue
-                        console.log('[Voice Mode] No speech detected (this is normal)');
+                        console.log('[Dictating Mode] No speech detected (this is normal)');
                     } else {
-                        console.error('[Voice Mode] Speech recognition error details:', event);
+                        console.error('[Dictating Mode] Speech recognition error details:', event);
                         showToast('error', `Speech recognition error: ${event.error}`);
                     }
                 };
@@ -412,7 +412,7 @@ export function initChatTab(elements, state) {
             // Clear any previous transcript message
             clearRealTimeTranscript();
             
-            console.log('[Voice Mode] Recording started');
+            console.log('[Dictating Mode] Recording started');
             showToast('success', 'Recording started');
             
         } catch (error) {
@@ -479,7 +479,7 @@ export function initChatTab(elements, state) {
         
         // Send message if we have a transcript
         const finalTranscript = voiceModeState.transcript.trim();
-        console.log('[Voice Mode] Recording stopped', {
+        console.log('[Dictating Mode] Recording stopped', {
             transcript: finalTranscript,
             hasTranscript: !!finalTranscript
         });
@@ -495,7 +495,7 @@ export function initChatTab(elements, state) {
                 voiceModeState.currentTranscriptMessage.classList.remove('message-sending');
             }
             
-            console.log('[Voice Mode] Sending voice message:', finalTranscript);
+            console.log('[Dictating Mode] Sending voice message:', finalTranscript);
             sendVoiceMessage(finalTranscript);
         } else {
             // Remove transcript message if no speech detected
@@ -503,7 +503,7 @@ export function initChatTab(elements, state) {
                 voiceModeState.currentTranscriptMessage.remove();
                 voiceModeState.currentTranscriptMessage = null;
             }
-            console.log('[Voice Mode] No speech detected');
+            console.log('[Dictating Mode] No speech detected');
             showToast('info', 'No speech detected');
         }
         
@@ -515,11 +515,11 @@ export function initChatTab(elements, state) {
     // Send voice message
     async function sendVoiceMessage(message) {
         if (!message || !message.trim()) {
-            console.warn('[Voice Mode] Attempted to send empty message');
+            console.warn('[Dictating Mode] Attempted to send empty message');
             return;
         }
         
-        console.log('[Voice Mode] Sending voice message to API', {
+        console.log('[Dictating Mode] Sending voice message to API', {
             message,
             language: voiceModeState.selectedLanguage,
             conversationId: state.currentConversationId
@@ -543,7 +543,7 @@ export function initChatTab(elements, state) {
                 state.currentConversationId
             );
             
-            console.log('[Voice Mode] Voice message response received', {
+            console.log('[Dictating Mode] Voice message response received', {
                 hasAudio: !!data.audio_base64,
                 hasReply: !!data.reply,
                 conversationId: data.conversation_id
@@ -665,7 +665,7 @@ export function initChatTab(elements, state) {
         }
     }
     
-    // Update voice mode status
+    // Update dictating mode status
     function updateVoiceModeStatus(status, isRecording = false) {
         const statusText = elements.voiceModeStatusCompact?.querySelector('.voice-mode-status-text');
         if (statusText) {
@@ -721,13 +721,13 @@ export function initChatTab(elements, state) {
         voiceModeState.recordingStartTime = null;
     }
     
-    // Enter voice mode
+    // Enter dictating mode
     async function enterVoiceMode() {
         if (voiceModeState.isActive) return;
         
         voiceModeState.isActive = true;
         
-        // Show compact voice mode controls
+        // Show compact dictating mode controls
         if (elements.voiceModeControls) {
             elements.voiceModeControls.classList.remove('hidden');
         }
@@ -759,10 +759,10 @@ export function initChatTab(elements, state) {
         }
         
         updateVoiceModeStatus('Click microphone to start recording');
-        showToast('success', 'Voice mode activated');
+        showToast('success', 'Dictating mode activated');
     }
     
-    // Exit voice mode
+    // Exit dictating mode
     function exitVoiceMode() {
         if (!voiceModeState.isActive) return;
         
@@ -774,7 +774,7 @@ export function initChatTab(elements, state) {
         // Clean up
         cleanupVoiceMode();
         
-        // Hide compact voice mode controls
+        // Hide compact dictating mode controls
         if (elements.voiceModeControls) {
             elements.voiceModeControls.classList.add('hidden');
         }
@@ -796,15 +796,15 @@ export function initChatTab(elements, state) {
                     </svg>
                 `;
             }
-            elements.voiceModeToggleBtn.setAttribute('aria-label', 'Use voice mode');
-            elements.voiceModeToggleBtn.setAttribute('title', 'Use voice mode');
+            elements.voiceModeToggleBtn.setAttribute('aria-label', 'Use dictating mode');
+            elements.voiceModeToggleBtn.setAttribute('title', 'Use dictating mode');
         }
         
         voiceModeState.isActive = false;
-        showToast('info', 'Voice mode deactivated');
+        showToast('info', 'Dictating mode deactivated');
     }
     
-    // Cleanup voice mode resources
+    // Cleanup dictating mode resources
     function cleanupVoiceMode() {
         stopRecording();
         stopRecordingTimer();
@@ -840,31 +840,31 @@ export function initChatTab(elements, state) {
         clearRealTimeTranscript();
     }
     
-    // Setup voice input and voice mode
+    // Setup voice input and dictating mode
     function setupVoiceFeatures() {
         // Check for speech recognition support
         if (!isSpeechRecognitionSupported()) {
             console.warn('Speech recognition not supported in this browser');
         }
         
-        // Setup voice mode toggle
+        // Setup dictating mode toggle
         if (elements.voiceModeToggleBtn) {
             elements.voiceModeToggleBtn.addEventListener('click', () => {
                 if (voiceModeState.isActive) {
-                    // If voice mode is active, toggle recording
+                    // If dictating mode is active, toggle recording
                     if (voiceModeState.isRecording) {
                         stopRecording();
                     } else {
                         startRecording();
                     }
                 } else {
-                    // Enter voice mode
+                    // Enter dictating mode
                 enterVoiceMode();
                 }
             });
         }
         
-        // Exit voice mode
+        // Exit dictating mode
         if (elements.exitVoiceModeBtn) {
             elements.exitVoiceModeBtn.addEventListener('click', () => {
                 exitVoiceMode();
@@ -893,7 +893,7 @@ export function initChatTab(elements, state) {
     return {
         handleChatSubmit,
         cleanup: () => {
-            // Cleanup voice mode when tab is switched away
+            // Cleanup dictating mode when tab is switched away
             if (voiceModeState.isActive) {
                 exitVoiceMode();
             }

@@ -102,7 +102,7 @@ async function init() {
                     setCurrentConversationId
                 };
                 initChatTab(elements, chatState);
-                // Populate voices for voice mode language selector
+                // Populate voices for dictating mode language selector
                 populateVoicesInSelects();
                 initializedTabs.add(tabName);
                 setTimeout(() => {
