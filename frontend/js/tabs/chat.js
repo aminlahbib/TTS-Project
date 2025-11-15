@@ -698,7 +698,16 @@ export function initChatTab(elements, state) {
             
             const statusText = elements.voiceModeStatusCompact?.querySelector('.voice-mode-status-text');
             if (statusText) {
-                statusText.innerHTML = `Listening... <span class="recording-indicator">● ${timeStr}</span>`;
+                const indicatorTemplate = document.getElementById('recordingIndicatorTemplate');
+                if (indicatorTemplate) {
+                    statusText.textContent = 'Listening... ';
+                    const indicator = indicatorTemplate.content.cloneNode(true).querySelector('.recording-indicator');
+                    indicator.textContent = `● ${timeStr}`;
+                    statusText.appendChild(indicator);
+                } else {
+                    // Fallback
+                    statusText.innerHTML = `Listening... <span class="recording-indicator">● ${timeStr}</span>`;
+                }
             }
         }, 100);
     }
@@ -723,16 +732,23 @@ export function initChatTab(elements, state) {
             elements.voiceModeControls.classList.remove('hidden');
         }
         
-        // Change voice toggle button to mic button
+        // Change voice toggle button to mic button (using template)
         if (elements.voiceModeToggleBtn) {
-            elements.voiceModeToggleBtn.innerHTML = `
-                <svg class="voice-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                    <line x1="12" y1="19" x2="12" y2="23"></line>
-                    <line x1="8" y1="23" x2="16" y2="23"></line>
-                </svg>
-            `;
+            const template = document.getElementById('voiceToggleMicTemplate');
+            if (template) {
+                elements.voiceModeToggleBtn.innerHTML = '';
+                elements.voiceModeToggleBtn.appendChild(template.content.cloneNode(true));
+            } else {
+                // Fallback
+                elements.voiceModeToggleBtn.innerHTML = `
+                    <svg class="voice-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                        <line x1="12" y1="19" x2="12" y2="23"></line>
+                        <line x1="8" y1="23" x2="16" y2="23"></line>
+                    </svg>
+                `;
+            }
             elements.voiceModeToggleBtn.setAttribute('aria-label', 'Start recording');
             elements.voiceModeToggleBtn.setAttribute('title', 'Start recording');
         }
@@ -763,16 +779,23 @@ export function initChatTab(elements, state) {
             elements.voiceModeControls.classList.add('hidden');
         }
         
-        // Restore voice toggle button
+        // Restore voice toggle button (using template)
         if (elements.voiceModeToggleBtn) {
-            elements.voiceModeToggleBtn.innerHTML = `
-                <svg class="voice-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                    <line x1="12" y1="19" x2="12" y2="23"></line>
-                    <line x1="8" y1="23" x2="16" y2="23"></line>
-                </svg>
-            `;
+            const template = document.getElementById('voiceToggleMicTemplate');
+            if (template) {
+                elements.voiceModeToggleBtn.innerHTML = '';
+                elements.voiceModeToggleBtn.appendChild(template.content.cloneNode(true));
+            } else {
+                // Fallback
+                elements.voiceModeToggleBtn.innerHTML = `
+                    <svg class="voice-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                        <line x1="12" y1="19" x2="12" y2="23"></line>
+                        <line x1="8" y1="23" x2="16" y2="23"></line>
+                    </svg>
+                `;
+            }
             elements.voiceModeToggleBtn.setAttribute('aria-label', 'Use voice mode');
             elements.voiceModeToggleBtn.setAttribute('title', 'Use voice mode');
         }

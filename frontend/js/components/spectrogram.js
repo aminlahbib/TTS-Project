@@ -88,11 +88,21 @@ export function visualizeMelFrame(spectrogramState, melFrame) {
 export function displaySpectrogram(container, base64Data) {
     if (!container) return;
     
-    container.innerHTML = `
-        <div class="spectrogram-wrapper">
-            <h4>Mel Spectrogram:</h4>
-            <img src="data:image/png;base64,${base64Data}" alt="Spectrogram" loading="lazy" class="spectrogram-image">
-        </div>
-    `;
+    const template = document.getElementById('spectrogramWrapperTemplate');
+    if (template) {
+        const wrapper = template.content.cloneNode(true).querySelector('.spectrogram-wrapper');
+        const img = wrapper.querySelector('.spectrogram-image');
+        img.src = `data:image/png;base64,${base64Data}`;
+        container.innerHTML = '';
+        container.appendChild(wrapper);
+    } else {
+        // Fallback
+        container.innerHTML = `
+            <div class="spectrogram-wrapper">
+                <h4>Mel Spectrogram:</h4>
+                <img src="data:image/png;base64,${base64Data}" alt="Spectrogram" loading="lazy" class="spectrogram-image">
+            </div>
+        `;
+    }
 }
 

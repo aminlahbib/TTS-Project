@@ -1,6 +1,5 @@
 // Server Tab Module - Server information and metrics
 
-import { CONFIG } from '../config.js';
 import { checkServerHealth, getServerMetrics, getVoices, getVoiceDetails } from '../services/api.js';
 import { showStatus, updateServerStatus } from '../utils/dom.js';
 import { formatLanguageName } from '../utils/format.js';
@@ -11,6 +10,33 @@ import { formatLanguageName } from '../utils/format.js';
  * @returns {Object} Tab handlers and cleanup functions
  */
 export function initServerTab(elements) {
+    // Helper function to get templates
+    function getTemplates() {
+        const gridTemplate = document.getElementById('metricsGridTemplate');
+        const cardTemplate = document.getElementById('metricCardTemplate');
+        if (!gridTemplate || !cardTemplate) {
+            console.error('Templates not found: metricsGridTemplate or metricCardTemplate');
+            return null;
+        }
+        return { gridTemplate, cardTemplate };
+    }
+    
+    // Helper function to create an error card
+    function createErrorCard(message) {
+        const templates = getTemplates();
+        if (!templates) return null;
+        
+        const grid = templates.gridTemplate.content.cloneNode(true).querySelector('.metrics-grid');
+        const errorCard = templates.cardTemplate.content.cloneNode(true).querySelector('.metric-card');
+        errorCard.querySelector('.metric-label').textContent = 'Error';
+        const errorValue = errorCard.querySelector('.metric-value');
+        errorValue.textContent = 'Failed';
+        errorValue.style.color = '#ef4444';
+        errorCard.querySelector('.metric-detail').textContent = message;
+        grid.appendChild(errorCard);
+        
+        return grid;
+    }
     // Check server status
     async function checkServerStatus() {
         console.log('[Server Tab] Checking server status...');
@@ -31,21 +57,29 @@ export function initServerTab(elements) {
                 updateServerStatus(elements.serverStatus, 'connected', 'Server Connected');
             }
             if (elements.serverInfo) {
-                const statusHtml = `
-                    <div class="metrics-grid">
-                        <div class="metric-card">
-                            <div class="metric-label">Server Status</div>
-                            <div class="metric-value" style="color: #10b981;">Connected</div>
-                            <div class="metric-detail">Server is running and healthy!</div>
-                        </div>
-                        <div class="metric-card">
-                            <div class="metric-label">Response Time</div>
-                            <div class="metric-value">${healthResponse.response_time_ms ? healthResponse.response_time_ms.toFixed(0) : 'N/A'}ms</div>
-                            <div class="metric-detail">Health check response</div>
-                        </div>
-                    </div>
-                `;
-                elements.serverInfo.innerHTML = statusHtml;
+                const templates = getTemplates();
+                if (!templates) return;
+                
+                const grid = templates.gridTemplate.content.cloneNode(true).querySelector('.metrics-grid');
+                
+                // Status card
+                const statusCard = templates.cardTemplate.content.cloneNode(true).querySelector('.metric-card');
+                statusCard.querySelector('.metric-label').textContent = 'Server Status';
+                const statusValue = statusCard.querySelector('.metric-value');
+                statusValue.textContent = 'Connected';
+                statusValue.style.color = '#10b981';
+                statusCard.querySelector('.metric-detail').textContent = 'Server is running and healthy!';
+                grid.appendChild(statusCard);
+                
+                // Response time card
+                const timeCard = templates.cardTemplate.content.cloneNode(true).querySelector('.metric-card');
+                timeCard.querySelector('.metric-label').textContent = 'Response Time';
+                timeCard.querySelector('.metric-value').textContent = `${healthResponse.response_time_ms ? healthResponse.response_time_ms.toFixed(0) : 'N/A'}ms`;
+                timeCard.querySelector('.metric-detail').textContent = 'Health check response';
+                grid.appendChild(timeCard);
+                
+                elements.serverInfo.innerHTML = '';
+                elements.serverInfo.appendChild(grid);
             }
         } catch (error) {
             console.error('[Server Tab] Server Status Error:', {
@@ -57,16 +91,20 @@ export function initServerTab(elements) {
                 updateServerStatus(elements.serverStatus, 'disconnected', 'Server Disconnected');
             }
             if (elements.serverInfo) {
-                const errorHtml = `
-                    <div class="metrics-grid">
-                        <div class="metric-card">
-                            <div class="metric-label">Server Status</div>
-                            <div class="metric-value" style="color: #ef4444;">Disconnected</div>
-                            <div class="metric-detail">Server is not responding: ${error.message}</div>
-                        </div>
-                    </div>
-                `;
-                elements.serverInfo.innerHTML = errorHtml;
+                const templates = getTemplates();
+                if (!templates) return;
+                
+                const grid = templates.gridTemplate.content.cloneNode(true).querySelector('.metrics-grid');
+                const errorCard = templates.cardTemplate.content.cloneNode(true).querySelector('.metric-card');
+                errorCard.querySelector('.metric-label').textContent = 'Server Status';
+                const errorValue = errorCard.querySelector('.metric-value');
+                errorValue.textContent = 'Disconnected';
+                errorValue.style.color = '#ef4444';
+                errorCard.querySelector('.metric-detail').textContent = `Server is not responding: ${error.message}`;
+                grid.appendChild(errorCard);
+                
+                elements.serverInfo.innerHTML = '';
+                elements.serverInfo.appendChild(grid);
             }
         }
     }
@@ -97,47 +135,57 @@ export function initServerTab(elements) {
                 ? metrics.system_load.toFixed(2) 
                 : 'N/A';
             
-            // Create metrics display
-            const metricsHtml = `
-                <div class="metrics-grid">
-                    <div class="metric-card">
-                        <div class="metric-label">CPU Usage</div>
-                        <div class="metric-value">${metrics.cpu_usage_percent.toFixed(1)}%</div>
-                        <div class="metric-bar">
-                            <div class="metric-bar-fill" style="width: ${Math.min(100, metrics.cpu_usage_percent)}%; background: ${metrics.cpu_usage_percent > 80 ? '#ef4444' : metrics.cpu_usage_percent > 60 ? '#f59e0b' : '#10b981'};"></div>
-                        </div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-label">Memory Usage</div>
-                        <div class="metric-value">${metrics.memory_usage_percent.toFixed(1)}%</div>
-                        <div class="metric-detail">${metrics.memory_used_mb} MB / ${metrics.memory_total_mb} MB</div>
-                        <div class="metric-bar">
-                            <div class="metric-bar-fill" style="width: ${Math.min(100, metrics.memory_usage_percent)}%; background: ${metrics.memory_usage_percent > 80 ? '#ef4444' : metrics.memory_usage_percent > 60 ? '#f59e0b' : '#10b981'};"></div>
-                        </div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-label">Total Requests</div>
-                        <div class="metric-value">${metrics.request_count.toLocaleString()}</div>
-                        <div class="metric-detail">Since server start</div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-label">Uptime</div>
-                        <div class="metric-value">${uptimeStr}</div>
-                        <div class="metric-detail">${metrics.uptime_seconds.toLocaleString()} seconds</div>
-                    </div>
-                    ${metrics.system_load ? `
-                    <div class="metric-card">
-                        <div class="metric-label">System Load</div>
-                        <div class="metric-value">${loadStr}</div>
-                        <div class="metric-detail">1-minute average</div>
-                    </div>
-                    ` : ''}
-                </div>
-            `;
-            
-            if (elements.serverMetrics) {
-                elements.serverMetrics.innerHTML = metricsHtml;
+            // Create metrics display using templates
+            if (!elements.serverMetrics) {
+                console.error('serverMetrics element not found');
+                return;
             }
+            
+            const templates = getTemplates();
+            if (!templates) return;
+            
+            const grid = templates.gridTemplate.content.cloneNode(true).querySelector('.metrics-grid');
+            
+            // Helper function to create a metric card
+            const createMetricCard = (label, value, detail, showBar = false, barWidth = 0, barColor = '#10b981') => {
+                const card = templates.cardTemplate.content.cloneNode(true).querySelector('.metric-card');
+                card.querySelector('.metric-label').textContent = label;
+                card.querySelector('.metric-value').textContent = value;
+                if (detail) {
+                    card.querySelector('.metric-detail').textContent = detail;
+                }
+                if (showBar) {
+                    const barContainer = card.querySelector('.metric-bar');
+                    barContainer.style.display = 'block';
+                    const barFill = barContainer.querySelector('.metric-bar-fill');
+                    barFill.style.width = `${Math.min(100, barWidth)}%`;
+                    barFill.style.background = barColor;
+                }
+                return card;
+            };
+            
+            // CPU Usage
+            const cpuColor = metrics.cpu_usage_percent > 80 ? '#ef4444' : metrics.cpu_usage_percent > 60 ? '#f59e0b' : '#10b981';
+            grid.appendChild(createMetricCard('CPU Usage', `${metrics.cpu_usage_percent.toFixed(1)}%`, null, true, metrics.cpu_usage_percent, cpuColor));
+            
+            // Memory Usage
+            const memColor = metrics.memory_usage_percent > 80 ? '#ef4444' : metrics.memory_usage_percent > 60 ? '#f59e0b' : '#10b981';
+            const memCard = createMetricCard('Memory Usage', `${metrics.memory_usage_percent.toFixed(1)}%`, `${metrics.memory_used_mb} MB / ${metrics.memory_total_mb} MB`, true, metrics.memory_usage_percent, memColor);
+            grid.appendChild(memCard);
+            
+            // Total Requests
+            grid.appendChild(createMetricCard('Total Requests', metrics.request_count.toLocaleString(), 'Since server start'));
+            
+            // Uptime
+            grid.appendChild(createMetricCard('Uptime', uptimeStr, `${metrics.uptime_seconds.toLocaleString()} seconds`));
+            
+            // System Load (if available)
+            if (metrics.system_load) {
+                grid.appendChild(createMetricCard('System Load', loadStr, '1-minute average'));
+            }
+            
+            elements.serverMetrics.innerHTML = '';
+            elements.serverMetrics.appendChild(grid);
         } catch (error) {
             console.error('Metrics Error:', error);
             if (elements.serverMetrics) {
@@ -164,32 +212,30 @@ export function initServerTab(elements) {
         try {
             const voicesList = await getVoices();
             if (elements.serverInfo) {
-                const voicesHtml = `
-                    <div class="metrics-grid">
-                        ${voicesList.map(voice => `
-                            <div class="metric-card">
-                                <div class="metric-label">Voice</div>
-                                <div class="metric-value">${formatLanguageName(voice)}</div>
-                                <div class="metric-detail">${voice}</div>
-                            </div>
-                        `).join('')}
-                    </div>
-                `;
-                elements.serverInfo.innerHTML = voicesHtml;
+                const templates = getTemplates();
+                if (!templates) return;
+                
+                const grid = templates.gridTemplate.content.cloneNode(true).querySelector('.metrics-grid');
+                
+                voicesList.forEach(voice => {
+                    const card = templates.cardTemplate.content.cloneNode(true).querySelector('.metric-card');
+                    card.querySelector('.metric-label').textContent = 'Voice';
+                    card.querySelector('.metric-value').textContent = formatLanguageName(voice);
+                    card.querySelector('.metric-detail').textContent = voice;
+                    grid.appendChild(card);
+                });
+                
+                elements.serverInfo.innerHTML = '';
+                elements.serverInfo.appendChild(grid);
             }
         } catch (error) {
             console.error('Voices Error:', error);
             if (elements.serverInfo) {
-                const errorHtml = `
-                    <div class="metrics-grid">
-                        <div class="metric-card">
-                            <div class="metric-label">Error</div>
-                            <div class="metric-value" style="color: #ef4444;">Failed</div>
-                            <div class="metric-detail">Error fetching voices: ${error.message}</div>
-                        </div>
-                    </div>
-                `;
-                elements.serverInfo.innerHTML = errorHtml;
+                const grid = createErrorCard(`Error fetching voices: ${error.message}`);
+                if (grid) {
+                    elements.serverInfo.innerHTML = '';
+                    elements.serverInfo.appendChild(grid);
+                }
             }
         }
     }
@@ -208,36 +254,31 @@ export function initServerTab(elements) {
         try {
             const details = await getVoiceDetails();
             if (elements.serverInfo) {
-                const detailsHtml = `
-                    <div class="metrics-grid">
-                        ${details.map(v => `
-                            <div class="metric-card">
-                                <div class="metric-label">Voice</div>
-                                <div class="metric-value">${formatLanguageName(v.key)}</div>
-                                <div class="metric-detail">
-                                    <strong>Code:</strong> ${v.key}<br>
-                                    <strong>Config:</strong> ${v.config}<br>
-                                    <strong>Speaker:</strong> ${v.speaker !== null ? v.speaker : 'Default'}
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                `;
-                elements.serverInfo.innerHTML = detailsHtml;
+                const templates = getTemplates();
+                if (!templates) return;
+                
+                const grid = templates.gridTemplate.content.cloneNode(true).querySelector('.metrics-grid');
+                
+                details.forEach(v => {
+                    const card = templates.cardTemplate.content.cloneNode(true).querySelector('.metric-card');
+                    card.querySelector('.metric-label').textContent = 'Voice';
+                    card.querySelector('.metric-value').textContent = formatLanguageName(v.key);
+                    const detailEl = card.querySelector('.metric-detail');
+                    detailEl.innerHTML = `<strong>Code:</strong> ${v.key}<br><strong>Config:</strong> ${v.config}<br><strong>Speaker:</strong> ${v.speaker !== null ? v.speaker : 'Default'}`;
+                    grid.appendChild(card);
+                });
+                
+                elements.serverInfo.innerHTML = '';
+                elements.serverInfo.appendChild(grid);
             }
         } catch (error) {
             console.error('Voice Details Error:', error);
             if (elements.serverInfo) {
-                const errorHtml = `
-                    <div class="metrics-grid">
-                        <div class="metric-card">
-                            <div class="metric-label">Error</div>
-                            <div class="metric-value" style="color: #ef4444;">Failed</div>
-                            <div class="metric-detail">Error fetching voice details: ${error.message}</div>
-                        </div>
-                    </div>
-                `;
-                elements.serverInfo.innerHTML = errorHtml;
+                const grid = createErrorCard(`Error fetching voice details: ${error.message}`);
+                if (grid) {
+                    elements.serverInfo.innerHTML = '';
+                    elements.serverInfo.appendChild(grid);
+                }
             }
         }
     }
