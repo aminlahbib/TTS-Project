@@ -564,6 +564,16 @@ pub async fn stream_ws(
 
     ws.on_upgrade(move |mut socket| async move {
         use axum::extract::ws::Message;
+        
+        // Send synthesizing status
+        let _ = socket.send(Message::Text(
+            serde_json::json!({ 
+                "type": "status", 
+                "status": "synthesizing", 
+                "message": "Generating audio..." 
+            }).to_string().into()
+        )).await;
+        
         let samples = match state.tts.synthesize_blocking(&text, Some(&lang)) {
             Ok(s) => s,
             Err(e) => {
@@ -582,11 +592,38 @@ pub async fn stream_ws(
         let frame_size = 1024usize;
         let hop_size = 256usize;
         let n_mels = 80usize;
+        
+        // Calculate total info for metadata
+        let total_samples = samples.len();
+        let total_chunks = (total_samples + hop_size - 1) / hop_size; // Ceiling division
+        let estimated_duration = total_samples as f32 / sample_rate;
+        
+        // Send initial metadata message
+        let _ = socket.send(Message::Text(
+            serde_json::json!({
+                "type": "metadata",
+                "sample_rate": sample_rate as u32,
+                "total_samples": total_samples,
+                "estimated_duration": estimated_duration,
+                "total_chunks": total_chunks,
+                "hop_size": hop_size
+            }).to_string().into()
+        )).await;
+        
+        // Send streaming status
+        let _ = socket.send(Message::Text(
+            serde_json::json!({ 
+                "type": "status", 
+                "status": "streaming", 
+                "message": "Streaming audio chunks..." 
+            }).to_string().into()
+        )).await;
 
         let mut stft = mel_spec::prelude::Spectrogram::new(frame_size, hop_size);
         let mut mel = mel_spec::prelude::MelSpectrogram::new(frame_size, sample_rate as f64, n_mels);
 
         let mut offset = 0usize;
+        let mut chunk_number = 0usize;
         while offset + hop_size <= samples.len() {
             let slice = &samples[offset..offset + hop_size];
             let mel_frame_f64: Vec<f64> = if let Some(fft_frame) = stft.add(slice) {
@@ -600,8 +637,24 @@ pub async fn stream_ws(
             };
             let mel_frame: Vec<f32> = mel_frame_f64.iter().copied().map(|v| v as f32).collect();
             let chunk: Vec<f32> = slice.to_vec();
+            
+            // Calculate progress metadata
+            chunk_number += 1;
+            let progress = (offset as f32 / total_samples as f32) * 100.0;
+            let timestamp = offset as f32 / sample_rate;
+            let chunk_duration = hop_size as f32 / sample_rate;
 
-            let msg = serde_json::json!({ "audio": chunk, "mel": mel_frame });
+            let msg = serde_json::json!({ 
+                "type": "chunk",
+                "audio": chunk, 
+                "mel": mel_frame,
+                "chunk": chunk_number,
+                "total_chunks": total_chunks,
+                "progress": progress,
+                "timestamp": timestamp,
+                "duration": chunk_duration,
+                "offset": offset
+            });
             if let Err(e) = socket.send(Message::Text(msg.to_string().into())).await {
                 warn!("Failed to send WS message: {e}");
                 break;
@@ -609,7 +662,12 @@ pub async fn stream_ws(
             offset += hop_size;
         }
 
-        let _ = socket.send(Message::Text(serde_json::json!({ "status": "complete" }).to_string().into())).await;
+        let _ = socket.send(Message::Text(
+            serde_json::json!({ 
+                "type": "status", 
+                "status": "complete" 
+            }).to_string().into()
+        )).await;
         let _ = socket.close().await;
     })
 }

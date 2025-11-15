@@ -53,9 +53,10 @@ export function initElements() {
         streamWaveform: document.getElementById('streamWaveform'),
         chatMessages: document.getElementById('chatMessages'),
         streamProgress: document.getElementById('streamProgress'),
+        streamMetrics: document.getElementById('streamMetrics'),
         serverMetrics: document.getElementById('serverMetrics'),
         
-        // Custom Audio Player
+        // Custom Audio Player - TTS
         ttsAudioPlayer: document.getElementById('ttsAudioPlayer'),
         ttsPlayPause: document.getElementById('ttsPlayPause'),
         ttsProgress: document.getElementById('ttsProgress'),
@@ -65,9 +66,18 @@ export function initElements() {
         ttsCurrentTime: document.querySelector('#ttsAudioPlayer .current-time'),
         ttsDuration: document.querySelector('#ttsAudioPlayer .duration'),
         
+        // Custom Audio Player - Stream
+        streamAudioPlayer: document.getElementById('streamAudioPlayer'),
+        streamPlayPause: document.getElementById('streamPlayPause'),
+        streamProgressSlider: document.getElementById('streamProgressSlider'),
+        streamSpeed: document.getElementById('streamSpeed'),
+        streamCurrentTime: document.getElementById('streamCurrentTime'),
+        streamDuration: document.getElementById('streamDuration'),
+        
         // Groups
         speakerGroup: document.getElementById('speakerGroup'),
         ttsCharCount: document.getElementById('ttsCharCount'),
+        streamCharCount: document.getElementById('streamCharCount'),
         
         // Toast container
         toastContainer: document.getElementById('toastContainer')
