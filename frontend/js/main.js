@@ -4,14 +4,14 @@ import { initElements } from './utils/dom.js';
 import { setupTabs } from './utils/tabs.js';
 import { populateLanguageSelects } from './utils/voices.js';
 import { showToast } from './utils/toast.js';
-import { showStatus, setButtonState, updateServerStatus } from './utils/dom.js';
-import { setupCustomAudioPlayer, setupAudioPlayer, downloadAudio } from './components/audioPlayer.js';
-import { displaySpectrogram, initStreamSpectrogram, visualizeMelFrame } from './components/spectrogram.js';
-import { addChatMessage, clearChat, exportChat, scrollChatToBottom } from './components/chat.js';
-import { getVoices, getVoiceDetails, generateTTS, sendChatMessage, sendVoiceChatMessage, checkServerHealth, getServerMetrics } from './services/api.js';
-import { startWebSocketStream } from './services/websocket.js';
-import { generateWaveform, base64ToBlob, playAudio } from './utils/audio.js';
-import { formatLanguageName } from './utils/format.js';
+import { showStatus, updateServerStatus } from './utils/dom.js';
+import { setupCustomAudioPlayer, downloadAudio } from './components/audioPlayer.js';
+import { scrollChatToBottom } from './components/chat.js';
+import { getVoices, getVoiceDetails, checkServerHealth } from './services/api.js';
+import { initTtsTab } from './tabs/tts.js';
+import { initStreamTab } from './tabs/stream.js';
+import { initChatTab } from './tabs/chat.js';
+import { initServerTab } from './tabs/server.js';
 
 // Global state
 let elements = {};
@@ -22,7 +22,19 @@ let currentStreamAudioBlob = null;
 let currentConversationId = null;
 let isStreaming = false;
 let currentWebSocket = null;
-let streamSpectrogramState = null;
+
+// State management functions
+function setCurrentAudioBlob(blob) {
+    currentAudioBlob = blob;
+}
+
+function setCurrentStreamAudioBlob(blob) {
+    currentStreamAudioBlob = blob;
+}
+
+function setCurrentConversationId(id) {
+    currentConversationId = id;
+}
 
 // Initialize the application
 async function init() {
@@ -45,6 +57,9 @@ async function init() {
                 scrollChatToBottom(elements.chatMessages);
             }, 100);
         }
+        if (tabName === 'server') {
+            // Server tab will check status on initialization
+        }
     });
     
     // Check server status on load
@@ -53,27 +68,39 @@ async function init() {
     // Load voices dynamically
     await loadVoices();
     
-    // Set up event listeners
-    setupEventListeners();
-    
-    // Set up streaming handler
-    if (elements.streamForm) {
-        elements.streamForm.addEventListener('submit', handleStreamSubmit);
-    }
-    
-    // Set up character counter
-    setupCharacterCounter();
-    
     // Set up custom audio player
     setupCustomAudioPlayer(elements);
     
-    // Setup voice input for chat tab (simplified - just hide button if not supported)
-    setupVoiceInput();
+    // Initialize tab modules
+    const ttsState = {
+        setCurrentAudioBlob
+    };
+    initTtsTab(elements, ttsState);
     
-    // Setup voice mode toggle
-    setupVoiceModeToggle();
+    // Stream state with getters/setters for reactivity
+    const streamState = {
+        get isStreaming() { return isStreaming; },
+        set isStreaming(value) { isStreaming = value; },
+        get currentWebSocket() { return currentWebSocket; },
+        set currentWebSocket(value) { currentWebSocket = value; },
+        setCurrentStreamAudioBlob
+    };
+    initStreamTab(elements, streamState);
     
-    console.log('Frontend initialized successfully');
+    // Chat state with getters/setters for reactivity
+    const chatState = {
+        get currentConversationId() { return currentConversationId; },
+        set currentConversationId(value) { currentConversationId = value; },
+        setCurrentConversationId
+    };
+    initChatTab(elements, chatState);
+    
+    const serverTab = initServerTab(elements);
+    
+    // Set up download button handlers
+    setupDownloadHandlers();
+    
+    console.log('[Main] Frontend initialized successfully');
 }
 
 // Load voices from API
@@ -94,455 +121,65 @@ async function loadVoices() {
     }
 }
 
-// Set up event listeners
-function setupEventListeners() {
-    // TTS Form Handler
-    if (elements.ttsForm) {
-        elements.ttsForm.addEventListener('submit', handleTtsSubmit);
-    }
-    
-    // Streaming Form Handler - set up in init() after elements are initialized
-    
-    // Chat Form Handler
-    if (elements.chatForm) {
-        elements.chatForm.addEventListener('submit', handleChatSubmit);
-    }
-    
-    // Enter key support for chat
-    if (elements.chatInput) {
-        elements.chatInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                if (elements.chatForm) {
-                    elements.chatForm.dispatchEvent(new Event('submit'));
-                }
-            }
-        });
-    }
-    
-    // Download buttons
+// Set up download button handlers
+function setupDownloadHandlers() {
+    // TTS download button
     if (elements.downloadTtsBtn) {
         elements.downloadTtsBtn.addEventListener('click', () => {
             try {
-                downloadAudio(currentAudioBlob, `tts-${Date.now()}.wav`);
-                showStatus(elements.ttsStatus, 'success', 'Audio downloaded!');
-                showToast(elements.toastContainer, 'success', 'Audio downloaded successfully!');
+                if (currentAudioBlob) {
+                    downloadAudio(currentAudioBlob, `tts-${Date.now()}.wav`);
+                    showStatus(elements.ttsStatus, 'success', 'Audio downloaded!');
+                    showToast('success', 'Audio downloaded successfully!');
+                } else {
+                    showStatus(elements.ttsStatus, 'error', 'No audio to download');
+                }
             } catch (error) {
                 showStatus(elements.ttsStatus, 'error', error.message);
             }
         });
     }
     
+    // Stream download button
     if (elements.streamDownloadBtn) {
         elements.streamDownloadBtn.addEventListener('click', () => {
             try {
-                downloadAudio(currentStreamAudioBlob, `stream-${Date.now()}.wav`);
-                showStatus(elements.streamStatus, 'success', 'Audio downloaded!');
-                showToast(elements.toastContainer, 'success', 'Streaming audio downloaded successfully!');
+                if (currentStreamAudioBlob) {
+                    downloadAudio(currentStreamAudioBlob, `stream-${Date.now()}.wav`);
+                    showStatus(elements.streamStatus, 'success', 'Audio downloaded!');
+                    showToast('success', 'Streaming audio downloaded successfully!');
+                } else {
+                    showStatus(elements.streamStatus, 'error', 'No audio to download');
+                }
             } catch (error) {
                 showStatus(elements.streamStatus, 'error', error.message);
             }
         });
     }
-    
-    // Clear and export chat buttons
-    if (elements.clearChatBtn) {
-        elements.clearChatBtn.addEventListener('click', () => {
-            clearChat(elements.chatMessages);
-            currentConversationId = null;
-            showStatus(elements.chatStatus, 'info', 'Chat cleared');
-            showToast(elements.toastContainer, 'success', 'Chat cleared');
-        });
-    }
-    
-    if (elements.exportChatBtn) {
-        elements.exportChatBtn.addEventListener('click', () => {
-            exportChat(elements.chatMessages);
-            showStatus(elements.chatStatus, 'success', 'Chat exported!');
-            showToast(elements.toastContainer, 'success', 'Chat exported successfully!');
-        });
-    }
 }
 
-// Set up character counter
-function setupCharacterCounter() {
-    if (!elements.ttsText || !elements.ttsCharCount) return;
-    
-    elements.ttsText.addEventListener('input', () => {
-        const count = elements.ttsText.value.length;
-        elements.ttsCharCount.textContent = count;
-    });
-    elements.ttsCharCount.textContent = elements.ttsText.value.length;
-}
-
-// TTS Form Submission Handler
-async function handleTtsSubmit(e) {
-    e.preventDefault();
-    
-    if (!elements.ttsText || !elements.ttsLanguage) return;
-    
-    const text = elements.ttsText.value.trim();
-    const language = elements.ttsLanguage.value;
-    const speaker = elements.ttsSpeaker?.value ? parseInt(elements.ttsSpeaker.value) : null;
-    
-    if (!text) {
-        showStatus(elements.ttsStatus, 'error', 'Please enter some text to synthesize');
-        return;
-    }
-    
-    if (!language) {
-        showStatus(elements.ttsStatus, 'error', 'Please select a language');
-        return;
-    }
-    
-    setButtonState(elements.ttsBtn, true, 'Generating...');
-    showStatus(elements.ttsStatus, 'info', 'Generating speech...');
-    if (elements.downloadTtsBtn) elements.downloadTtsBtn.style.display = 'none';
-    if (elements.ttsAudioPlayer) elements.ttsAudioPlayer.classList.add('hidden');
-    
-    try {
-        const data = await generateTTS(text, language, speaker);
-        
-        // Store audio blob for download
-        currentAudioBlob = await base64ToBlob(data.audio_base64, 'audio/wav');
-        
-        // Set up custom audio player
-        await setupAudioPlayer(elements, data.audio_base64);
-        
-        // Display spectrogram if available
-        if (data.spectrogram_base64) {
-            displaySpectrogram(elements.ttsSpectrogram, data.spectrogram_base64);
-        }
-        
-        showStatus(elements.ttsStatus, 'success', 
-            `Speech generated successfully!<br>
-             Duration: ${(data.duration_ms / 1000).toFixed(2)}s<br>
-             Sample Rate: ${data.sample_rate}Hz`);
-        
-        showToast(elements.toastContainer, 'success', 'Speech generated successfully!');
-        
-    } catch (error) {
-        console.error('TTS Error:', error);
-        showStatus(elements.ttsStatus, 'error', `Error: ${error.message}`);
-        showToast(elements.toastContainer, 'error', `Error: ${error.message}`);
-    } finally {
-        setButtonState(elements.ttsBtn, false, 'Generate Speech');
-    }
-}
-
-// Streaming Form Submission Handler
-async function handleStreamSubmit(e) {
-    e.preventDefault();
-    
-    const text = elements.streamText.value.trim();
-    const language = elements.streamLanguage.value;
-    
-    if (!text) {
-        showStatus(elements.streamStatus, 'error', 'Please enter some text to stream');
-        return;
-    }
-    
-    if (!language) {
-        showStatus(elements.streamStatus, 'error', 'Please select a language');
-        return;
-    }
-    
-    if (isStreaming) {
-        // Stop streaming
-        if (currentWebSocket) {
-            currentWebSocket.close();
-            currentWebSocket = null;
-        }
-        isStreaming = false;
-        setButtonState(elements.streamBtn, false, 'Start Streaming');
-        showStatus(elements.streamStatus, 'info', 'Streaming stopped.');
-        elements.streamProgress.classList.add('hidden');
-        return;
-    }
-    
-    // Reset UI elements for new stream
-    if (elements.streamSpectrogram) {
-        elements.streamSpectrogram.classList.add('hidden');
-    }
-    if (elements.streamAudioContainer) {
-        elements.streamAudioContainer.classList.add('hidden');
-    }
-    currentStreamAudioBlob = null;
-    
-    setButtonState(elements.streamBtn, true, 'Connecting...');
-    showStatus(elements.streamStatus, 'info', 'Connecting to stream...');
-    
-    // Initialize spectrogram
-    streamSpectrogramState = initStreamSpectrogram(
-        elements.streamSpectrogramCanvas,
-        elements.streamSpectrogram
-    );
-    if (streamSpectrogramState && elements.streamSpectrogram) {
-        elements.streamSpectrogram.classList.remove('hidden');
-    }
-    
-    try {
-        const cleanup = await startWebSocketStream(text, language, {
-            isStreaming: () => isStreaming,
-            onOpen: () => {
-                isStreaming = true;
-                setButtonState(elements.streamBtn, false, 'Stop Streaming');
-                showStatus(elements.streamStatus, 'success', 'Connected! Streaming audio...');
-                showToast(elements.toastContainer, 'success', 'Streaming started');
-                elements.streamProgress.classList.remove('hidden');
-            },
-            onProgress: (chunks) => {
-                const progressFill = elements.streamProgress.querySelector('.progress-fill');
-                if (progressFill) {
-                    progressFill.style.width = `${Math.min(100, chunks * 2)}%`;
-                }
-            },
-            onMelFrame: (melFrame) => {
-                if (streamSpectrogramState) {
-                    visualizeMelFrame(streamSpectrogramState, melFrame);
-                }
-            },
-            onError: (error) => {
-                showStatus(elements.streamStatus, 'error', error);
-                showToast(elements.toastContainer, 'error', error);
-            },
-            onReconnecting: (attempt, max) => {
-                showStatus(elements.streamStatus, 'info', 
-                    `Connection lost. Reconnecting... (${attempt}/${max})`);
-            },
-            onAudioBlob: (blob) => {
-                currentStreamAudioBlob = blob;
-            },
-            waveformCanvas: elements.streamWaveform,
-            onComplete: async (wavBase64, chunks, samples) => {
-                await playAudio(elements.streamAudio, wavBase64);
-                elements.streamAudioContainer.classList.remove('hidden');
-                showStatus(elements.streamStatus, 'success', 
-                    `Streaming complete! Audio ready to play.<br>
-                     Received ${chunks} chunks, ${samples} samples total.`);
-                showToast(elements.toastContainer, 'success', 'Streaming complete!');
-            },
-            onClose: () => {
-                isStreaming = false;
-                currentWebSocket = null;
-                setButtonState(elements.streamBtn, false, 'Start Streaming');
-                elements.streamProgress.classList.add('hidden');
-            }
-        });
-        
-        // Store cleanup function for stopping
-        currentWebSocket = { close: cleanup };
-    } catch (error) {
-        console.error('Streaming Error:', error);
-        showStatus(elements.streamStatus, 'error', `Error: ${error.message}`);
-        setButtonState(elements.streamBtn, false, 'Start Streaming');
-    }
-}
-
-// Chat Form Submission Handler
-async function handleChatSubmit(e) {
-    e.preventDefault();
-    
-    const message = elements.chatInput.value.trim();
-    
-    if (!message) {
-        showStatus(elements.chatStatus, 'error', 'Please enter a message');
-        return;
-    }
-    
-    // Add user message to chat
-    addChatMessage(elements.chatMessages, 'user', message);
-    elements.chatInput.value = '';
-    
-    setButtonState(elements.chatBtn, true, 'Thinking...');
-    showStatus(elements.chatStatus, 'info', 'Sending message...');
-    
-    try {
-        const data = await sendChatMessage(message, currentConversationId);
-        
-        // Store conversation ID
-        currentConversationId = data.conversation_id;
-        
-        // Add bot response with audio
-        addChatMessage(elements.chatMessages, 'bot', data.reply || 'No response received', data.audio_base64);
-        
-        showStatus(elements.chatStatus, 'success', 'Message sent successfully!');
-        showToast(elements.toastContainer, 'success', 'Message sent successfully!');
-        
-    } catch (error) {
-        console.error('Chat Error:', error);
-        addChatMessage(elements.chatMessages, 'bot', 
-            `Sorry, I'm having trouble connecting to the AI service. ${error.message}`);
-        showStatus(elements.chatStatus, 'error', `Error: ${error.message}`);
-        showToast(elements.toastContainer, 'error', `Error: ${error.message}`);
-    } finally {
-        setButtonState(elements.chatBtn, false, 'Send');
-    }
-}
-
-// Server Status Functions
+// Server Status Functions (called from main init)
 async function checkServerStatus() {
     console.log('[Main] Checking server status...');
     try {
         const healthResponse = await checkServerHealth();
         console.log('[Main] Server health check passed:', healthResponse);
-        updateServerStatus(elements.serverStatus, 'connected', 'Server Connected');
-        showStatus(elements.serverInfo, 'success', 'Server is running and healthy!');
-        showToast(elements.toastContainer, 'success', 'Server connected');
+        if (elements.serverStatus) {
+            updateServerStatus(elements.serverStatus, 'connected', 'Server Connected');
+        }
+        showToast('success', 'Server connected');
     } catch (error) {
         console.error('[Main] Server Status Error:', {
             name: error.name,
             message: error.message,
             stack: error.stack
         });
-        updateServerStatus(elements.serverStatus, 'disconnected', 'Server Disconnected');
-        showStatus(elements.serverInfo, 'error', `Server is not responding: ${error.message}`);
-        showToast(elements.toastContainer, 'error', `Server connection failed: ${error.message}`);
-    }
-}
-
-async function displayServerMetrics() {
-    if (elements.serverMetrics) {
-        elements.serverMetrics.classList.remove('hidden');
-    }
-    showStatus(elements.serverInfo, 'info', 'Fetching server metrics...');
-    
-    try {
-        const metrics = await getServerMetrics();
-        
-        const uptimeHours = Math.floor(metrics.uptime_seconds / 3600);
-        const uptimeMinutes = Math.floor((metrics.uptime_seconds % 3600) / 60);
-        const uptimeSeconds = metrics.uptime_seconds % 60;
-        const uptimeStr = `${uptimeHours}h ${uptimeMinutes}m ${uptimeSeconds}s`;
-        
-        const loadStr = metrics.system_load 
-            ? metrics.system_load.toFixed(2) 
-            : 'N/A';
-        
-        const metricsHtml = `
-            <div class="metrics-grid">
-                <div class="metric-card">
-                    <div class="metric-label">CPU Usage</div>
-                    <div class="metric-value">${metrics.cpu_usage_percent.toFixed(1)}%</div>
-                    <div class="metric-bar">
-                        <div class="metric-bar-fill" style="width: ${Math.min(100, metrics.cpu_usage_percent)}%; background: ${metrics.cpu_usage_percent > 80 ? '#ef4444' : metrics.cpu_usage_percent > 60 ? '#f59e0b' : '#10b981'};"></div>
-                    </div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-label">Memory Usage</div>
-                    <div class="metric-value">${metrics.memory_usage_percent.toFixed(1)}%</div>
-                    <div class="metric-detail">${metrics.memory_used_mb} MB / ${metrics.memory_total_mb} MB</div>
-                    <div class="metric-bar">
-                        <div class="metric-bar-fill" style="width: ${Math.min(100, metrics.memory_usage_percent)}%; background: ${metrics.memory_usage_percent > 80 ? '#ef4444' : metrics.memory_usage_percent > 60 ? '#f59e0b' : '#10b981'};"></div>
-                    </div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-label">Total Requests</div>
-                    <div class="metric-value">${metrics.request_count.toLocaleString()}</div>
-                    <div class="metric-detail">Since server start</div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-label">Uptime</div>
-                    <div class="metric-value">${uptimeStr}</div>
-                    <div class="metric-detail">${metrics.uptime_seconds.toLocaleString()} seconds</div>
-                </div>
-                ${metrics.system_load ? `
-                <div class="metric-card">
-                    <div class="metric-label">System Load</div>
-                    <div class="metric-value">${loadStr}</div>
-                    <div class="metric-detail">1-minute average</div>
-                </div>
-                ` : ''}
-            </div>
-        `;
-        
-        if (elements.serverMetrics) {
-            elements.serverMetrics.innerHTML = metricsHtml;
+        if (elements.serverStatus) {
+            updateServerStatus(elements.serverStatus, 'disconnected', 'Server Disconnected');
         }
-        
-        showStatus(elements.serverInfo, 'success', 'Server metrics retrieved successfully!');
-        showToast(elements.toastContainer, 'success', 'Metrics updated');
-    } catch (error) {
-        console.error('Metrics Error:', error);
-        showStatus(elements.serverInfo, 'error', `Error fetching metrics: ${error.message}`);
-        if (elements.serverMetrics) {
-            elements.serverMetrics.classList.add('hidden');
-        }
+        showToast('error', `Server connection failed: ${error.message}`);
     }
 }
-
-async function displayVoices() {
-    showStatus(elements.serverInfo, 'info', 'Fetching voices...');
-    
-    try {
-        const voicesList = await getVoices();
-        showStatus(elements.serverInfo, 'success', 
-            `Available voices:<br>
-             ${voicesList.map(voice => `• ${formatLanguageName(voice)} (${voice})`).join('<br>')}`);
-    } catch (error) {
-        console.error('Voices Error:', error);
-        showStatus(elements.serverInfo, 'error', `Error fetching voices: ${error.message}`);
-    }
-}
-
-async function getVoicesDetail() {
-    showStatus(elements.serverInfo, 'info', 'Fetching voice details...');
-    
-    try {
-        const details = await getVoiceDetails();
-        const detailsHtml = details.map(v => 
-            `• <strong>${formatLanguageName(v.key)}</strong> (${v.key})<br>
-             &nbsp;&nbsp;Config: ${v.config}<br>
-             &nbsp;&nbsp;Speaker: ${v.speaker !== null ? v.speaker : 'Default'}`
-        ).join('<br><br>');
-        
-        showStatus(elements.serverInfo, 'success', 
-            `Voice details:<br><br>${detailsHtml}`);
-    } catch (error) {
-        console.error('Voice Details Error:', error);
-        showStatus(elements.serverInfo, 'error', `Error fetching voice details: ${error.message}`);
-    }
-}
-
-// Voice input setup (simplified)
-function setupVoiceInput() {
-    // Check for speech recognition support
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-        if (elements.chatMicBtn) {
-            elements.chatMicBtn.style.display = 'none';
-        }
-        console.warn('Speech recognition not supported in this browser');
-        return;
-    }
-    // Full implementation would go here - for now just ensure button is visible
-}
-
-// Voice mode toggle setup
-function setupVoiceModeToggle() {
-    if (elements.voiceModeToggleBtn) {
-        elements.voiceModeToggleBtn.addEventListener('click', () => {
-            if (elements.textInputWrapper && elements.voiceModeWrapper) {
-                elements.textInputWrapper.classList.add('hidden');
-                elements.voiceModeWrapper.classList.remove('hidden');
-            }
-        });
-    }
-    
-    if (elements.exitVoiceModeBtn) {
-        elements.exitVoiceModeBtn.addEventListener('click', () => {
-            if (elements.textInputWrapper && elements.voiceModeWrapper) {
-                elements.textInputWrapper.classList.remove('hidden');
-                elements.voiceModeWrapper.classList.add('hidden');
-            }
-        });
-    }
-}
-
-// Global Functions (for HTML onclick handlers)
-window.checkServerStatus = checkServerStatus;
-window.getServerMetrics = displayServerMetrics;
-window.getVoices = displayVoices;
-window.getVoicesDetail = getVoicesDetail;
 
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', init);
