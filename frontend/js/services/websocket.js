@@ -1,15 +1,11 @@
 // WebSocket service for streaming
 
 import { CONFIG } from '../config.js';
-import { convertF32ArrayToWavBase64, base64ToBlob } from '../utils/audio.js';
-import { playAudio } from '../utils/audio.js';
-import { generateWaveform } from '../utils/audio.js';
+import { convertF32ArrayToWavBase64, base64ToBlob, generateWaveform } from '../utils/audio.js';
 
 const { WS_BASE, STREAMING } = CONFIG;
 
-/**
- * Start WebSocket stream for TTS
- */
+// Start WebSocket stream for TTS
 export function startWebSocketStream(text, language, callbacks) {
     const encodedText = encodeURIComponent(text);
     const wsUrl = `${WS_BASE}/stream/${language}/${encodedText}`;
@@ -91,10 +87,22 @@ export function startWebSocketStream(text, language, callbacks) {
                     try {
                         const wavBase64 = convertF32ArrayToWavBase64(audioSamples, sampleRate);
                         
-                        base64ToBlob(wavBase64, 'audio/wav').then(async blob => {
-                            callbacks.onAudioBlob?.(blob);
-                            await generateWaveform(blob, callbacks.waveformCanvas, 120);
-                        });
+                        // Generate waveform if canvas is provided
+                        if (callbacks.waveformCanvas) {
+                            base64ToBlob(wavBase64, 'audio/wav').then(async blob => {
+                                callbacks.onAudioBlob?.(blob);
+                                try {
+                                    await generateWaveform(blob, callbacks.waveformCanvas, 120);
+                                } catch (waveformError) {
+                                    console.warn('Error generating waveform:', waveformError);
+                                }
+                            });
+                        } else {
+                            // Still call onAudioBlob even without waveform canvas
+                            base64ToBlob(wavBase64, 'audio/wav').then(blob => {
+                                callbacks.onAudioBlob?.(blob);
+                            });
+                        }
                         
                         callbacks.onComplete?.(wavBase64, receivedChunks, audioSamples.length);
                     } catch (error) {

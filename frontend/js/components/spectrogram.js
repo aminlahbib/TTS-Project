@@ -21,7 +21,8 @@ export function initStreamSpectrogram(canvas, container) {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
-    return { ctx, melFrames };
+    // Store canvas reference for visualizeMelFrame
+    return { ctx, melFrames, canvas };
 }
 
 /**

@@ -1,13 +1,60 @@
 // Configuration constants for the TTS application
 
+/**
+ * Get the base URL for API requests
+ * Handles localhost, Docker, and production environments
+ */
+function getApiBase() {
+    const hostname = window.location.hostname;
+    const protocol = window.location.protocol;
+    const port = window.location.port;
+    
+    // Backend API port (different from frontend port)
+    const API_PORT = '8085';
+    
+    // Debug logging
+    console.log('[Config] Determining API base URL:', {
+        hostname,
+        protocol,
+        port,
+        fullLocation: window.location.href
+    });
+    
+    // Check if we're accessing via Docker (common Docker hostnames)
+    // In Docker, frontend and backend are on same host but different ports
+    const isDocker = hostname === 'localhost' || 
+                     hostname === '127.0.0.1' || 
+                     hostname === '' ||
+                     hostname.includes('.local') ||
+                     port === '8082'; // Frontend nginx port
+    
+    let apiBase;
+    if (isDocker) {
+        // Development/Docker: backend is on same host, different port
+        apiBase = `${protocol}//${hostname}:${API_PORT}`;
+    } else {
+        // Production: use same protocol and hostname, but backend port (8085)
+        apiBase = `${protocol}//${hostname}:${API_PORT}`;
+    }
+    
+    console.log('[Config] API Base URL:', apiBase);
+    return apiBase;
+}
+
+/**
+ * Get the WebSocket base URL
+ * Automatically uses ws:// or wss:// based on current protocol
+ */
+function getWebSocketBase() {
+    const apiBase = getApiBase();
+    // Replace http:// with ws:// or https:// with wss://
+    return apiBase.replace(/^http/, 'ws');
+}
+
 export const CONFIG = {
     // API Configuration
-    API_BASE: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
-        ? 'http://localhost:8085' 
-        : `http://${window.location.hostname}:8085`,
-    WS_BASE: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-        ? 'ws://localhost:8085'
-        : `ws://${window.location.hostname}:8085`,
+    API_BASE: getApiBase(),
+    WS_BASE: getWebSocketBase(),
     
     // Streaming Configuration
     STREAMING: {
