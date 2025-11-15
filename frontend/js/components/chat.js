@@ -59,8 +59,15 @@ export function addChatMessage(container, sender, message, audioBase64 = null, s
     messageContent.className = 'message-content';
     
     if (state === 'generating') {
-        // Show typing indicator for generating messages
-        messageContent.innerHTML = '<span class="typing-indicator"><span></span><span></span><span></span></span>';
+        // Show typing indicator for generating messages (using template)
+        const typingTemplate = document.getElementById('typingIndicatorTemplate');
+        if (typingTemplate) {
+            const typingIndicator = typingTemplate.content.cloneNode(true);
+            messageContent.appendChild(typingIndicator);
+        } else {
+            // Fallback
+            messageContent.innerHTML = '<span class="typing-indicator"><span></span><span></span><span></span></span>';
+        }
     } else {
         messageContent.textContent = message;
     }
@@ -131,7 +138,15 @@ export function updateMessageState(messageElement, state, content = null) {
         messageElement.classList.add('message-sending');
     } else if (state === 'generating') {
         messageElement.classList.add('message-generating');
-        messageContent.innerHTML = '<span class="typing-indicator"><span></span><span></span><span></span></span>';
+        const typingTemplate = document.getElementById('typingIndicatorTemplate');
+        if (typingTemplate) {
+            messageContent.innerHTML = '';
+            const typingIndicator = typingTemplate.content.cloneNode(true);
+            messageContent.appendChild(typingIndicator);
+        } else {
+            // Fallback
+            messageContent.innerHTML = '<span class="typing-indicator"><span></span><span></span><span></span></span>';
+        }
     } else if (state === 'complete' && content) {
         messageContent.textContent = content;
     }

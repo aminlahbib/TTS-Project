@@ -13,5 +13,21 @@
     </div>
     <div id="serverInfo" class="metrics-container"></div>
     <div id="serverMetrics" class="metrics-container hidden"></div>
+    
+    <!-- Templates for dynamic content -->
+    <template id="metricCardTemplate">
+        <div class="metric-card">
+            <div class="metric-label"></div>
+            <div class="metric-value"></div>
+            <div class="metric-detail"></div>
+            <div class="metric-bar" style="display: none;">
+                <div class="metric-bar-fill"></div>
+            </div>
+        </div>
+    </template>
+    
+    <template id="metricsGridTemplate">
+        <div class="metrics-grid"></div>
+    </template>
 </section>
 
