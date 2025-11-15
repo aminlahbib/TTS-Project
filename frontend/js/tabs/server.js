@@ -10,6 +10,12 @@ import { formatLanguageName } from '../utils/format.js';
  * @returns {Object} Tab handlers and cleanup functions
  */
 export function initServerTab(elements) {
+    // Metrics streaming state
+    let metricsStreamInterval = null;
+    let isStreamingMetrics = false;
+    let metricsGrid = null; // Reference to the current metrics grid for updates
+    const METRICS_REFRESH_RATE = 500; // Refresh rate in milliseconds (500ms = 0.5 seconds)
+    
     // Helper function to get templates
     function getTemplates() {
         const gridTemplate = document.getElementById('metricsGridTemplate');
@@ -39,6 +45,9 @@ export function initServerTab(elements) {
     }
     // Check server status
     async function checkServerStatus() {
+        // Stop metrics streaming if active
+        stopMetricsStreaming();
+        
         console.log('[Server Tab] Checking server status...');
         
         // Clear other displays
@@ -115,10 +124,71 @@ export function initServerTab(elements) {
         }
     }
     
+    // Update metrics display (for real-time streaming)
+    function updateMetricsDisplay(metrics) {
+        if (!metricsGrid || !elements.serverMetrics) return;
+        
+        const cards = metricsGrid.querySelectorAll('.metric-card');
+        if (cards.length === 0) return;
+        
+        // Format uptime
+        const uptimeHours = Math.floor(metrics.uptime_seconds / 3600);
+        const uptimeMinutes = Math.floor((metrics.uptime_seconds % 3600) / 60);
+        const uptimeSeconds = metrics.uptime_seconds % 60;
+        const uptimeStr = `${uptimeHours}h ${uptimeMinutes}m ${uptimeSeconds}s`;
+        
+        // Format system load
+        const loadStr = metrics.system_load 
+            ? metrics.system_load.toFixed(2) 
+            : 'N/A';
+        
+        // Update each card based on label
+        cards.forEach(card => {
+            const label = card.querySelector('.metric-label')?.textContent;
+            const valueEl = card.querySelector('.metric-value');
+            const detailEl = card.querySelector('.metric-detail');
+            const barFill = card.querySelector('.metric-bar-fill');
+            
+            switch (label) {
+                case 'CPU Usage':
+                    valueEl.textContent = `${metrics.cpu_usage_percent.toFixed(1)}%`;
+                    if (barFill) {
+                        const cpuColor = metrics.cpu_usage_percent > 80 ? '#ef4444' : metrics.cpu_usage_percent > 60 ? '#f59e0b' : '#10b981';
+                        barFill.style.width = `${Math.min(100, metrics.cpu_usage_percent)}%`;
+                        barFill.style.background = cpuColor;
+                    }
+                    break;
+                case 'Memory Usage':
+                    valueEl.textContent = `${metrics.memory_usage_percent.toFixed(1)}%`;
+                    if (detailEl) {
+                        detailEl.textContent = `${metrics.memory_used_mb} MB / ${metrics.memory_total_mb} MB`;
+                    }
+                    if (barFill) {
+                        const memColor = metrics.memory_usage_percent > 80 ? '#ef4444' : metrics.memory_usage_percent > 60 ? '#f59e0b' : '#10b981';
+                        barFill.style.width = `${Math.min(100, metrics.memory_usage_percent)}%`;
+                        barFill.style.background = memColor;
+                    }
+                    break;
+                case 'Total Requests':
+                    valueEl.textContent = metrics.request_count.toLocaleString();
+                    break;
+                case 'Uptime':
+                    valueEl.textContent = uptimeStr;
+                    if (detailEl) {
+                        detailEl.textContent = `${metrics.uptime_seconds.toLocaleString()} seconds`;
+                    }
+                    break;
+                case 'System Load':
+                    valueEl.textContent = loadStr;
+                    break;
+            }
+        });
+    }
+    
     // Display server metrics
-    async function displayServerMetrics() {
+    async function displayServerMetrics(updateOnly = false) {
         // Clear other displays
-        if (elements.serverInfo) {
+        if (elements.serverInfo && !updateOnly) {
             elements.serverInfo.innerHTML = '';
         }
         
@@ -141,6 +211,12 @@ export function initServerTab(elements) {
                 ? metrics.system_load.toFixed(2) 
                 : 'N/A';
             
+            // If updating existing display, just update values
+            if (updateOnly && metricsGrid) {
+                updateMetricsDisplay(metrics);
+                return;
+            }
+            
             // Create metrics display using templates
             if (!elements.serverMetrics) {
                 console.error('serverMetrics element not found');
@@ -151,6 +227,7 @@ export function initServerTab(elements) {
             if (!templates) return;
             
             const grid = templates.gridTemplate.content.cloneNode(true).querySelector('.metrics-grid');
+            metricsGrid = grid; // Store reference for updates
             
             // Helper function to create a metric card
             const createMetricCard = (label, value, detail, showBar = false, barWidth = 0, barColor = '#10b981') => {
@@ -198,14 +275,63 @@ export function initServerTab(elements) {
                 elements.serverMetrics.classList.add('hidden');
                 elements.serverMetrics.innerHTML = '';
             }
-            if (elements.serverInfo) {
+            if (elements.serverInfo && !updateOnly) {
                 showStatus(elements.serverInfo, 'error', `Error fetching metrics: ${error.message}`);
+            }
+        }
+    }
+    
+    // Stop metrics streaming (helper function)
+    function stopMetricsStreaming() {
+        if (isStreamingMetrics) {
+            if (metricsStreamInterval) {
+                clearInterval(metricsStreamInterval);
+                metricsStreamInterval = null;
+            }
+            isStreamingMetrics = false;
+            updateMetricsButton(false);
+        }
+    }
+    
+    // Start/stop metrics streaming
+    function toggleMetricsStreaming() {
+        if (isStreamingMetrics) {
+            // Stop streaming
+            stopMetricsStreaming();
+        } else {
+            // Start streaming
+            // First display metrics
+            displayServerMetrics(false);
+            
+            // Then set up interval to update at configured refresh rate
+            metricsStreamInterval = setInterval(() => {
+                displayServerMetrics(true); // Update only
+            }, METRICS_REFRESH_RATE);
+            
+            isStreamingMetrics = true;
+            updateMetricsButton(true);
+        }
+    }
+    
+    // Update metrics button text and state
+    function updateMetricsButton(streaming) {
+        const button = document.querySelector('button[onclick="getServerMetrics()"]');
+        if (button) {
+            if (streaming) {
+                button.textContent = 'Metrics Streaming';
+                button.classList.add('streaming-active');
+            } else {
+                button.textContent = 'Get Metrics';
+                button.classList.remove('streaming-active');
             }
         }
     }
     
     // Display voices list
     async function displayVoices() {
+        // Stop metrics streaming if active
+        stopMetricsStreaming();
+        
         // Clear other displays
         if (elements.serverInfo) {
             elements.serverInfo.innerHTML = '';
@@ -248,6 +374,9 @@ export function initServerTab(elements) {
     
     // Display voice details
     async function displayVoiceDetails() {
+        // Stop metrics streaming if active
+        stopMetricsStreaming();
+        
         // Clear other displays
         if (elements.serverInfo) {
             elements.serverInfo.innerHTML = '';
@@ -293,9 +422,15 @@ export function initServerTab(elements) {
     function setupEventListeners() {
         // These functions are exposed to window for HTML onclick handlers
         window.checkServerStatus = checkServerStatus;
-        window.getServerMetrics = displayServerMetrics;
+        window.getServerMetrics = toggleMetricsStreaming;
         window.getVoices = displayVoices;
         window.getVoicesDetail = displayVoiceDetails;
+    }
+    
+    // Cleanup function to stop streaming when tab is closed
+    function cleanup() {
+        stopMetricsStreaming();
+        metricsGrid = null;
     }
     
     // Initialize
@@ -308,7 +443,8 @@ export function initServerTab(elements) {
         checkServerStatus,
         displayServerMetrics,
         displayVoices,
-        displayVoiceDetails
+        displayVoiceDetails,
+        cleanup
     };
 }
 

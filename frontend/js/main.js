@@ -88,9 +88,20 @@ async function init() {
                     scrollChatToBottom(elements.chatMessages);
                 }, 100);
             }
+            // Cleanup server tab when switching away from it
+            const previousTab = document.querySelector('.tab-content.active[data-tab]');
+            if (previousTab && previousTab.getAttribute('data-tab') === 'server' && tabName !== 'server' && window.serverTabCleanup) {
+                window.serverTabCleanup();
+                window.serverTabCleanup = null;
+            }
+            
             if (tabName === 'server') {
                 // Initialize server tab
-                initServerTab(elements);
+                const serverTab = initServerTab(elements);
+                // Store cleanup function for when tab changes
+                if (serverTab && serverTab.cleanup) {
+                    window.serverTabCleanup = serverTab.cleanup;
+                }
                 initializedTabs.add(tabName);
             }
             if (tabName === 'tts') {

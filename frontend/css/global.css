@@ -76,6 +76,8 @@ body {
     padding: var(--space-xl) var(--space-md);
     border-right: 1px solid var(--border);
     flex-shrink: 0;
+    overflow-y: auto;
+    scrollbar-gutter: stable; /* Reserve space for scrollbar to prevent layout shifts */
 }
 
 .logo {
@@ -126,6 +128,7 @@ body {
     width: 100%;
     padding-bottom: var(--space-xl);
     direction: ltr; /* Keep scrollbar on right */
+    scrollbar-gutter: stable; /* Reserve space for scrollbar to prevent layout shifts */
 }
 
 /* Chat tab special layout - full height */
@@ -395,6 +398,44 @@ select {
     width: 100%;
 }
 
+.btn-secondary.streaming-active {
+    background: var(--primary);
+    color: rgba(255, 255, 255, 0.9);
+    position: relative;
+    animation: pulse-streaming 2s ease-in-out infinite;
+}
+
+.btn-secondary.streaming-active::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    right: 0.75rem;
+    transform: translateY(-50%);
+    width: 8px;
+    height: 8px;
+    background: #ef4444;
+    border-radius: 50%;
+    animation: blink 1s ease-in-out infinite;
+}
+
+@keyframes pulse-streaming {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4);
+    }
+    50% {
+        box-shadow: 0 0 0 4px rgba(59, 130, 246, 0);
+    }
+}
+
+@keyframes blink {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.3;
+    }
+}
+
 .btn-secondary {
     background: var(--surface-light);
     border-color: var(--border-light);
@@ -441,6 +482,20 @@ select {
     grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
     gap: var(--space-xs);
     margin-top: var(--space-md);
+}
+
+/* Server tab button group - fixed width to prevent size changes */
+#serverSection .button-group {
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--space-xs);
+}
+
+#serverSection .button-group .btn {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+    text-align: center;
 }
 
 /* Status */
@@ -606,6 +661,16 @@ select {
 
     .button-group {
         grid-template-columns: 1fr;
+    }
+    
+    /* Server tab buttons - single column on mobile, maintain equal width */
+    #serverSection .button-group {
+        grid-template-columns: 1fr;
+    }
+    
+    #serverSection .button-group .btn {
+        width: 100%;
+        min-width: 0;
     }
 
     .toast-container {
