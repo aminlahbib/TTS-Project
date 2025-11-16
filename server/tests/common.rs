@@ -127,7 +127,7 @@ pub async fn create_test_app() -> Router {
             }
         }))
         .route("/chat", post({
-            move |State(s): State<AppState>, Json(req): Json<ChatRequest>| async move {
+            move |State(_s): State<AppState>, Json(req): Json<ChatRequest>| async move {
                 match validate_chat_request(&req.message) {
                     Ok(_) => {
                         if let Some(ref conv_id) = req.conversation_id {

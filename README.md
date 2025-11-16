@@ -4,13 +4,12 @@ High-performance multilingual Text-to-Speech and Chat server built with Rust, fe
 
 ## 📚 Documentation
 
-**Complete documentation is available in the [`docs/`](docs/) folder.**
-
-- **[Documentation Index](docs/README.md)** - Overview of all documentation
-- **[Quick Start Guide](QUICKSTART.md)** - Get started quickly
-- **[Architecture](docs/ARCHITECTURE.md)** - System architecture and design
-- **[Tabs Analysis](docs/PROJECT_TABS_ANALYSIS.md)** - Detailed feature analysis
-- **[Testing Guide](docs/TESTING_CHECKLIST.md)** - Testing procedures
+- **[Quick Start](QUICKSTART.md)** - Get started in 5 minutes
+- **[API Reference](docs/API.md)** - Complete API documentation
+- **[Architecture](docs/ARCHITECTURE.md)** - System design
+- **[Deployment](docs/DEPLOYMENT.md)** - Production deployment
+- **[Testing](tests/README.md)** - Test suite guide
+- **[Docs Index](docs/README.md)** - All documentation
 
 ## Quick Start
 
@@ -59,9 +58,15 @@ Rust workspace with three crates:
 |--------|----------|-------------|
 | `GET` | `/health` | Health check |
 | `GET` | `/voices` | List available languages |
+| `GET` | `/voices/detail` | Detailed voice info |
 | `POST` | `/tts` | Synthesize speech |
 | `POST` | `/chat` | Chat with LLM |
-| `GET` | `/stream/:lang/:text` | WebSocket audio streaming |
+| `POST` | `/voice-chat` | Chat with audio response |
+| `WS` | `/stream/{lang}/{text}` | WebSocket TTS streaming |
+| `WS` | `/ws/chat/stream` | WebSocket chat streaming |
+| `GET` | `/metrics` | Server metrics |
+
+See [API Reference](docs/API.md) for details.
 
 ## Configuration
 
@@ -104,7 +109,9 @@ docker run -p 8082:80 tts-frontend
 
 ## Documentation
 
-- **[QUICKSTART.md](QUICKSTART.md)** - Setup guide
-- **[tests/README.md](tests/README.md)** - Testing docs
-- **[Frontend Guide](docs/FRONTEND_GUIDE.md)** - Frontend setup
-- **[Complete Documentation Index](docs/README.md)** - All documentation files
+- **[Quick Start](QUICKSTART.md)** - Setup guide
+- **[API Reference](docs/API.md)** - Complete API docs
+- **[Architecture](docs/ARCHITECTURE.md)** - System design
+- **[Deployment](docs/DEPLOYMENT.md)** - Production guide
+- **[Testing](tests/README.md)** - Test suite
+- **[All Docs](docs/README.md)** - Documentation index
