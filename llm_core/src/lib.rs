@@ -67,7 +67,6 @@ pub struct OpenAiClient {
     api_key: String,
     org_id: Option<String>,
     client: std::sync::OnceLock<Client>,
-    async_client: std::sync::OnceLock<reqwest::Client>,
     model: String,
     max_tokens: u16,
     max_retries: usize,
@@ -83,7 +82,6 @@ impl OpenAiClient {
             api_key,
             org_id: env::var("OPENAI_ORG_ID").ok(),
             client: std::sync::OnceLock::new(),
-            async_client: std::sync::OnceLock::new(),
             model: model.to_string(),
             max_tokens: env::var("OPENAI_MAX_TOKENS")
                 .ok()
@@ -110,17 +108,6 @@ impl OpenAiClient {
                 .timeout(Duration::from_secs(self.timeout_secs))
                 .tcp_keepalive(Duration::from_secs(60)) // Keep connections alive for reuse
                 .pool_max_idle_per_host(10) // Connection pooling for better performance
-                .build()
-                .unwrap()
-        })
-    }
-
-    fn get_async_client(&self) -> &reqwest::Client {
-        self.async_client.get_or_init(|| {
-            reqwest::Client::builder()
-                .timeout(Duration::from_secs(self.timeout_secs))
-                .tcp_keepalive(Duration::from_secs(60))
-                .pool_max_idle_per_host(10)
                 .build()
                 .unwrap()
         })
@@ -240,7 +227,8 @@ impl LlmProviderTrait for OpenAiClient {
             #[derive(Deserialize)]
             struct StreamChoice {
                 delta: StreamDelta,
-                finish_reason: Option<String>,
+                #[allow(dead_code)]
+                finish_reason: Option<String>, // Reserved for future use
             }
             #[derive(Deserialize)]
             struct StreamDelta {

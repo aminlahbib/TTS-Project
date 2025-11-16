@@ -387,7 +387,10 @@ pub async fn chat_endpoint(
             let message = message.clone();
             let conv_id = conv_id.clone();
             move || {
-                let llm = llm.lock().unwrap();
+                let llm = llm.lock().unwrap_or_else(|poisoned| {
+                    error!("LLM mutex poisoned in chat_endpoint, recovering: {}", poisoned);
+                    poisoned.into_inner()
+                });
                 let conv_id = conv_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                 match llm.chat_with_history(Some(conv_id.clone()), &message) {
                     Ok(reply) => Ok::<_, ApiError>((reply, conv_id)),
@@ -495,7 +498,10 @@ pub async fn voice_chat_endpoint(
             let message = message.clone();
             let conv_id = conv_id.clone();
             move || {
-                let llm = llm.lock().unwrap();
+                let llm = llm.lock().unwrap_or_else(|poisoned| {
+                    error!("LLM mutex poisoned in voice_chat_endpoint, recovering: {}", poisoned);
+                    poisoned.into_inner()
+                });
                 let conv_id = conv_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                 match llm.chat_with_history(Some(conv_id.clone()), &message) {
                     Ok(reply) => Ok::<_, ApiError>((reply, conv_id)),
@@ -617,7 +623,10 @@ pub async fn stream_ws(
                 }
             };
             
-            let synth = synth_arc.lock().unwrap();
+            let synth = synth_arc.lock().unwrap_or_else(|poisoned| {
+                error!("TTS synthesizer mutex poisoned, recovering: {}", poisoned);
+                poisoned.into_inner()
+            });
             
             // Create iterator and stream chunks as they come
             let iter = match synth.synthesize_parallel(text_clone, None) {
@@ -757,7 +766,10 @@ pub async fn stream_ws(
         }
         
         // Wait for synthesis task to complete (in case it's still running)
-        let _ = synthesis_task.await;
+        if let Err(e) = synthesis_task.await {
+            error!("Synthesis task error: {}", e);
+            // Don't fail the request if synthesis task had an error, as we may have already sent some chunks
+        }
         
         // Check for synthesis errors
         if let Some(err) = synthesis_error {
@@ -904,7 +916,10 @@ pub async fn chat_stream_ws(
             // The stream itself uses channels and spawned tasks, so it's independent
             let mut stream = {
                 // Hold lock only to create the stream
-                let llm_guard = llm.lock().unwrap();
+                let llm_guard = llm.lock().unwrap_or_else(|poisoned| {
+                    error!("LLM mutex poisoned in chat_stream_ws, recovering: {}", poisoned);
+                    poisoned.into_inner()
+                });
                 llm_guard.chat_with_history_stream(conv_id_clone, &message_clone)
             };
             // Lock is released here - stream should be independent
