@@ -665,6 +665,18 @@ export function initStreamTab(elements, state) {
         if (elements.streamForm) {
             elements.streamForm.addEventListener('submit', handleStreamSubmit);
         }
+        
+        // Enter key support for textarea (Shift+Enter for new line, Enter to submit)
+        if (elements.streamText) {
+            elements.streamText.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    if (elements.streamForm) {
+                        elements.streamForm.dispatchEvent(new Event('submit'));
+                    }
+                }
+            });
+        }
     }
     
     // Initialize
