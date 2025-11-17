@@ -30,22 +30,30 @@ export function initTtsTab(elements, state) {
     }
     
     // Show status message in the status container above audio player
+    let statusTimeoutId = null;
+    
     function showTtsStatus(type, message) {
         const statusWrapper = document.getElementById('ttsStatusMessageWrapper');
         const statusMessage = document.getElementById('ttsStatusMessage');
         
         if (!statusWrapper || !statusMessage) return;
         
+        // Clear any existing timeout
+        if (statusTimeoutId) {
+            clearTimeout(statusTimeoutId);
+            statusTimeoutId = null;
+        }
+        
         if (message) {
             statusMessage.className = `tts-status-message ${type}`;
             statusMessage.textContent = message;
             statusWrapper.style.display = 'flex';
             
-            // Auto-hide success messages after 5 seconds
-            if (type === 'success') {
-                setTimeout(() => {
-                    hideTtsStatus();
-                }, 5000);
+            // Only auto-hide info messages (like "Generating..."), not success messages
+            // Success messages stay until a new request is sent
+            if (type === 'info') {
+                // Info messages can auto-hide after a delay if needed
+                // But for now, we'll keep them visible too
             }
         } else {
             hideTtsStatus();
@@ -54,6 +62,12 @@ export function initTtsTab(elements, state) {
     
     // Hide status message
     function hideTtsStatus() {
+        // Clear any pending timeout
+        if (statusTimeoutId) {
+            clearTimeout(statusTimeoutId);
+            statusTimeoutId = null;
+        }
+        
         const statusWrapper = document.getElementById('ttsStatusMessageWrapper');
         if (statusWrapper) {
             statusWrapper.style.display = 'none';
