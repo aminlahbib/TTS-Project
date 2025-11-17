@@ -580,9 +580,10 @@
     height: 100%;
     background: rgba(99, 102, 241, 0.15);
     pointer-events: none;
-    transition: width 0.1s linear;
+    transition: width 0.05s linear;
     z-index: 1;
     mix-blend-mode: screen;
+    will-change: width;
 }
 
 /* Progress line indicator */
@@ -597,7 +598,8 @@
     z-index: 2;
     opacity: 0.8;
     box-shadow: 0 0 4px rgba(99, 102, 241, 0.6);
-    transition: left 0.1s linear;
+    transition: left 0.05s linear;
+    will-change: left;
 }
 
 /* Hover time tooltip */

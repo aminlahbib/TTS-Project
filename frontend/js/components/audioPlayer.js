@@ -74,15 +74,86 @@ export function setupCustomAudioPlayer(elements) {
     };
     elements.ttsAudio.addEventListener('loadedmetadata', loadedMetadataHandler);
     
+    // Smooth progress update using requestAnimationFrame
+    let animationFrameId = null;
+    let lastUpdateTime = 0;
+    const UPDATE_INTERVAL = 16; // ~60fps (16ms)
+    
+    const smoothProgressUpdate = () => {
+        const now = performance.now();
+        if (now - lastUpdateTime >= UPDATE_INTERVAL) {
+            lastUpdateTime = now;
+            
+            if (elements.ttsAudio.duration && isFinite(elements.ttsAudio.duration)) {
+                const currentTime = elements.ttsAudio.currentTime;
+                const progress = (currentTime / elements.ttsAudio.duration) * 100;
+                
+                // Update progress bar (only if not dragging)
+                if (elements.ttsProgress && !isDragging) {
+                    elements.ttsProgress.value = progress || 0;
+                }
+                
+                // Update time display
+                if (elements.ttsCurrentTime) {
+                    elements.ttsCurrentTime.textContent = formatTime(currentTime);
+                }
+                
+                // Update waveform progress indicator (smooth updates)
+                if (elements.ttsWaveform && !elements.ttsAudio.paused) {
+                    const container = elements.ttsWaveform.closest('.audio-waveform-container');
+                    if (container) {
+                        updateWaveformProgress(
+                            elements.ttsWaveform,
+                            container,
+                            currentTime,
+                            elements.ttsAudio.duration
+                        );
+                    }
+                }
+            }
+        }
+        
+        // Continue animation loop if audio is playing
+        if (!elements.ttsAudio.paused && !elements.ttsAudio.ended) {
+            animationFrameId = requestAnimationFrame(smoothProgressUpdate);
+        }
+    };
+    
     const timeUpdateHandler = () => {
-        if (elements.ttsProgress && !isDragging) {
-            const progress = (elements.ttsAudio.currentTime / elements.ttsAudio.duration) * 100;
-            elements.ttsProgress.value = progress || 0;
+        // Use timeupdate as a fallback and to start the animation loop
+        if (!animationFrameId && !elements.ttsAudio.paused) {
+            animationFrameId = requestAnimationFrame(smoothProgressUpdate);
         }
-        if (elements.ttsCurrentTime) {
-            elements.ttsCurrentTime.textContent = formatTime(elements.ttsAudio.currentTime);
+    };
+    elements.ttsAudio.addEventListener('timeupdate', timeUpdateHandler);
+    
+    // Start smooth updates when playing
+    const playHandler = () => {
+        const playIcon = elements.ttsPlayPause.querySelector('.play-icon');
+        const pauseIcon = elements.ttsPlayPause.querySelector('.pause-icon');
+        if (playIcon) playIcon.classList.add('hidden');
+        if (pauseIcon) pauseIcon.classList.remove('hidden');
+        
+        // Start smooth progress updates
+        if (!animationFrameId) {
+            animationFrameId = requestAnimationFrame(smoothProgressUpdate);
         }
-        // Update waveform progress indicator
+    };
+    
+    // Stop smooth updates when pausing
+    const pauseHandler = () => {
+        const playIcon = elements.ttsPlayPause.querySelector('.play-icon');
+        const pauseIcon = elements.ttsPlayPause.querySelector('.pause-icon');
+        if (playIcon) playIcon.classList.remove('hidden');
+        if (pauseIcon) pauseIcon.classList.add('hidden');
+        
+        // Stop animation loop
+        if (animationFrameId) {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+        }
+        
+        // Final update on pause
         if (elements.ttsWaveform && elements.ttsAudio.duration) {
             const container = elements.ttsWaveform.closest('.audio-waveform-container');
             if (container) {
@@ -95,23 +166,6 @@ export function setupCustomAudioPlayer(elements) {
             }
         }
     };
-    elements.ttsAudio.addEventListener('timeupdate', timeUpdateHandler);
-    
-    const playHandler = () => {
-        const playIcon = elements.ttsPlayPause.querySelector('.play-icon');
-        const pauseIcon = elements.ttsPlayPause.querySelector('.pause-icon');
-        if (playIcon) playIcon.classList.add('hidden');
-        if (pauseIcon) pauseIcon.classList.remove('hidden');
-    };
-    elements.ttsAudio.addEventListener('play', playHandler);
-    
-    const pauseHandler = () => {
-        const playIcon = elements.ttsPlayPause.querySelector('.play-icon');
-        const pauseIcon = elements.ttsPlayPause.querySelector('.pause-icon');
-        if (playIcon) playIcon.classList.remove('hidden');
-        if (pauseIcon) pauseIcon.classList.add('hidden');
-    };
-    elements.ttsAudio.addEventListener('pause', pauseHandler);
     
     const endedHandler = () => {
         elements.ttsAudio.currentTime = 0;
@@ -119,8 +173,41 @@ export function setupCustomAudioPlayer(elements) {
         const pauseIcon = elements.ttsPlayPause.querySelector('.pause-icon');
         if (playIcon) playIcon.classList.remove('hidden');
         if (pauseIcon) pauseIcon.classList.add('hidden');
+        
+        // Stop animation loop
+        if (animationFrameId) {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+        }
+        
+        // Reset progress
+        if (elements.ttsWaveform && elements.ttsAudio.duration) {
+            const container = elements.ttsWaveform.closest('.audio-waveform-container');
+            if (container) {
+                updateWaveformProgress(
+                    elements.ttsWaveform,
+                    container,
+                    0,
+                    elements.ttsAudio.duration
+                );
+            }
+        }
     };
+    
+    elements.ttsAudio.addEventListener('play', playHandler);
+    elements.ttsAudio.addEventListener('pause', pauseHandler);
     elements.ttsAudio.addEventListener('ended', endedHandler);
+    
+    // Cleanup function to cancel animation frame if needed
+    if (elements.ttsAudio._cleanupAnimation) {
+        elements.ttsAudio._cleanupAnimation();
+    }
+    elements.ttsAudio._cleanupAnimation = () => {
+        if (animationFrameId) {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+        }
+    };
 }
 
 /**
