@@ -179,8 +179,8 @@ export async function generateWaveform(audioBlob, canvas, height = null) {
         const step = Math.ceil(data.length / width);
         const amp = canvasHeight / 2;
         
-        // Clear with lighter background for better contrast
-        ctx.fillStyle = '#2a2a2a'; // Lighter dark gray background for better contrast
+        // Clear with black background to match spectrogram styling
+        ctx.fillStyle = '#000'; // Black background to match spectrogram
         ctx.fillRect(0, 0, width, canvasHeight);
         
         // Draw center line for reference (more visible)
