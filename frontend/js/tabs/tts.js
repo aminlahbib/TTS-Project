@@ -323,6 +323,18 @@ export function initTtsTab(elements, state) {
         if (elements.ttsForm) {
             elements.ttsForm.addEventListener('submit', handleTtsSubmit);
         }
+        
+        // Enter key support for textarea (Shift+Enter for new line, Enter to submit)
+        if (elements.ttsText) {
+            elements.ttsText.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    if (elements.ttsForm) {
+                        elements.ttsForm.dispatchEvent(new Event('submit'));
+                    }
+                }
+            });
+        }
     }
     
     // Initialize
