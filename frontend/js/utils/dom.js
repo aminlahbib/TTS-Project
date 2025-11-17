@@ -16,6 +16,7 @@ export function initElements() {
         ttsLanguage: document.getElementById('ttsLanguage'), // Legacy, may not exist
         ttsSpeaker: document.getElementById('ttsSpeaker'), // Legacy, may not exist
         streamText: document.getElementById('streamText'),
+        ttsResultsContent: document.getElementById('ttsResultsContent'),
         streamVoice: document.getElementById('streamVoice'),
         streamLanguage: document.getElementById('streamLanguage'), // Legacy, may not exist
         chatInput: document.getElementById('chatInput'),

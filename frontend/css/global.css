@@ -162,6 +162,37 @@ body {
     padding: 0;
 }
 
+/* TTS tab special layout - full height (same as chat) */
+.main-content:has(#ttsSection.active) {
+    padding: 0;
+    overflow: hidden;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    max-width: 100%;
+    min-height: 0; /* Important for flex children */
+}
+
+.main-content:has(#ttsSection.active) .header {
+    padding: var(--space-xl) var(--space-3xl) var(--space-lg);
+    margin-bottom: 0;
+    flex-shrink: 0;
+}
+
+/* Ensure tab content container fills remaining space for TTS */
+.main-content:has(#ttsSection.active) #tabContentContainer {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* TTS section should not have padding when active (handled by main-content) */
+.main-content:has(#ttsSection.active) #ttsSection {
+    padding: 0;
+}
+
 /* Custom Scrollbar - Right Positioned */
 .main-content::-webkit-scrollbar {
     width: 8px;
@@ -670,6 +701,10 @@ select.voice-select option {
     .main-content:has(#chatSection.active) .header {
         padding: var(--space-xl) var(--space-lg) var(--space-lg);
     }
+    
+    .main-content:has(#ttsSection.active) .header {
+        padding: var(--space-xl) var(--space-lg) var(--space-lg);
+    }
 }
 
 @media (max-width: 768px) {
@@ -701,6 +736,10 @@ select.voice-select option {
     }
 
     .main-content:has(#chatSection.active) .header {
+        padding: var(--space-lg) var(--space-lg) var(--space-lg);
+    }
+    
+    .main-content:has(#ttsSection.active) .header {
         padding: var(--space-lg) var(--space-lg) var(--space-lg);
     }
 
@@ -743,6 +782,10 @@ select.voice-select option {
     }
 
     .main-content:has(#chatSection.active) .header {
+        padding: var(--space-md) var(--space-md) var(--space-lg);
+    }
+    
+    .main-content:has(#ttsSection.active) .header {
         padding: var(--space-md) var(--space-md) var(--space-lg);
     }
 }

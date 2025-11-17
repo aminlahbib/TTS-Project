@@ -2,7 +2,7 @@
 
 import { CONFIG } from '../config.js';
 import { formatTime } from '../utils/format.js';
-import { base64ToBlob, generateWaveform } from '../utils/audio.js';
+import { base64ToBlob, generateWaveform, updateWaveformProgress } from '../utils/audio.js';
 
 // Access AUDIO safely (it's a regular property, not a getter)
 const AUDIO = CONFIG?.AUDIO || { DEFAULT_SPEED: 1.0 };
@@ -82,6 +82,18 @@ export function setupCustomAudioPlayer(elements) {
         if (elements.ttsCurrentTime) {
             elements.ttsCurrentTime.textContent = formatTime(elements.ttsAudio.currentTime);
         }
+        // Update waveform progress indicator
+        if (elements.ttsWaveform && elements.ttsAudio.duration) {
+            const container = elements.ttsWaveform.closest('.audio-waveform-container');
+            if (container) {
+                updateWaveformProgress(
+                    elements.ttsWaveform,
+                    container,
+                    elements.ttsAudio.currentTime,
+                    elements.ttsAudio.duration
+                );
+            }
+        }
     };
     elements.ttsAudio.addEventListener('timeupdate', timeUpdateHandler);
     
@@ -137,6 +149,9 @@ export async function setupAudioPlayer(elements, base64Data) {
         // Generate waveform
         if (elements.ttsWaveform) {
             await generateWaveform(audioBlob, elements.ttsWaveform);
+            
+            // Setup waveform interactivity (click to seek, hover tooltip)
+            setupWaveformInteractivity(elements.ttsWaveform, elements.ttsAudio);
         }
         
         // Auto-play audio after it's loaded
@@ -162,6 +177,63 @@ export async function setupAudioPlayer(elements, base64Data) {
         console.error('Audio Setup Error:', error);
         throw new Error('Failed to setup audio: ' + error.message);
     }
+}
+
+/**
+ * Setup waveform interactivity (click to seek, hover tooltip)
+ */
+function setupWaveformInteractivity(canvas, audioElement) {
+    if (!canvas || !audioElement) return;
+    
+    const container = canvas.closest('.audio-waveform-container');
+    if (!container) return;
+    
+    // Create tooltip element
+    const tooltip = document.createElement('div');
+    tooltip.className = 'audio-waveform-tooltip';
+    container.appendChild(tooltip);
+    
+    // Click to seek
+    const clickHandler = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const percent = Math.max(0, Math.min(1, x / rect.width));
+        
+        if (audioElement.duration && isFinite(audioElement.duration)) {
+            audioElement.currentTime = percent * audioElement.duration;
+        }
+    };
+    canvas.addEventListener('click', clickHandler);
+    container.addEventListener('click', clickHandler);
+    
+    // Hover to show time
+    const hoverHandler = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const percent = Math.max(0, Math.min(1, x / rect.width));
+        
+        if (audioElement.duration && isFinite(audioElement.duration)) {
+            const time = percent * audioElement.duration;
+            tooltip.textContent = formatTime(time);
+            tooltip.style.left = `${x}px`;
+        }
+    };
+    canvas.addEventListener('mousemove', hoverHandler);
+    container.addEventListener('mousemove', hoverHandler);
+    
+    // Hide tooltip on mouse leave
+    const leaveHandler = () => {
+        tooltip.style.opacity = '0';
+    };
+    canvas.addEventListener('mouseleave', leaveHandler);
+    container.addEventListener('mouseleave', leaveHandler);
+    
+    // Show tooltip on mouse enter
+    const enterHandler = () => {
+        tooltip.style.opacity = '1';
+    };
+    canvas.addEventListener('mouseenter', enterHandler);
+    container.addEventListener('mouseenter', enterHandler);
 }
 
 /**
