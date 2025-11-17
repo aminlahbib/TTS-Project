@@ -29,6 +29,33 @@ export function initVoiceChatTab(elements, state) {
     const transcriptText = elements.voiceTranscriptText;
     const convoLog = elements.voiceConversationLog;
     
+    // Initialize stateVoice early so it can be accessed by handleLanguageChange
+    const stateVoice = {
+        isRecording: false,
+        mediaStream: null,
+        audioContext: null,
+        analyser: null,
+        dataArray: null,
+        animationFrame: null,
+        speechRecognition: null,
+        transcript: '',
+        selectedLanguage: DEFAULT_LANGUAGE,
+        selectedVoice: null, // Full voice key (e.g., "en_US:norman")
+        botAudioContext: null,
+        botAnalyser: null,
+        botDataArray: null,
+        botAudio: null,
+        // Silence detection
+        lastVoiceTime: null,
+        hasDetectedSpeech: false,
+        wordReveal: {
+            active: false,
+            words: [],
+            targetEl: null,
+            fullText: ''
+        }
+    };
+    
     // Populate language and voice dropdowns when voiceDetails are available
     function populateVoiceDropdowns() {
         if (!voiceDetails || voiceDetails.length === 0) return;
@@ -111,32 +138,6 @@ export function initVoiceChatTab(elements, state) {
     }
     resizeCanvases();
     window.addEventListener('resize', resizeCanvases);
-    
-    const stateVoice = {
-        isRecording: false,
-        mediaStream: null,
-        audioContext: null,
-        analyser: null,
-        dataArray: null,
-        animationFrame: null,
-        speechRecognition: null,
-        transcript: '',
-        selectedLanguage: DEFAULT_LANGUAGE,
-        selectedVoice: null, // Full voice key (e.g., "en_US:norman")
-        botAudioContext: null,
-        botAnalyser: null,
-        botDataArray: null,
-        botAudio: null,
-        // Silence detection
-        lastVoiceTime: null,
-        hasDetectedSpeech: false,
-        wordReveal: {
-            active: false,
-            words: [],
-            targetEl: null,
-            fullText: ''
-        }
-    };
     
     // Update selected voice when voice select changes (language is already set)
     if (voiceSelect) {

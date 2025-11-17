@@ -68,7 +68,9 @@ export function initChatTab(elements, state) {
         const message = elements.chatInput.value.trim();
         
         if (!message) {
-            showStatus(elements.chatStatus, 'error', 'Please enter a message');
+            showChatStatus('error', 'Please enter a message');
+            // Auto-hide error after 3 seconds
+            setTimeout(() => hideChatStatus(), 3000);
             return;
         }
         
@@ -76,8 +78,17 @@ export function initChatTab(elements, state) {
         const userMessage = addChatMessage(elements.chatMessages, 'user', message, null, 'sending');
         elements.chatInput.value = '';
         
+        // Reset character counter
+        const charCountEl = document.getElementById('chatCharCount');
+        if (charCountEl) {
+            charCountEl.textContent = '0';
+        }
+        
+        // Update button state with better visual feedback
         setButtonState(elements.chatBtn, true, 'Thinking...');
-        showStatus(elements.chatStatus, 'info', 'Sending message...');
+        
+        // Show subtle status indicator above form (not in form)
+        showChatStatus('info', 'Sending message...');
         
         try {
             // Update user message to complete state
@@ -149,7 +160,8 @@ export function initChatTab(elements, state) {
                 }
             }
             
-            showStatus(elements.chatStatus, 'success', 'Message sent successfully!');
+            // Hide status on success (message is already visible in chat)
+            hideChatStatus();
             showToast('success', 'Message sent successfully!');
             
         } catch (error) {
@@ -160,12 +172,76 @@ export function initChatTab(elements, state) {
                 'bot', 
                 errorMessage
             );
-            showStatus(elements.chatStatus, 'error', `Error: ${error.message}`);
+            showChatStatus('error', `Error: ${error.message}`);
             showToast('error', `Error: ${error.message}`);
             // Announce error to screen readers
             announceToScreenReader(`Error: ${error.message}`, 'assertive');
         } finally {
             setButtonState(elements.chatBtn, false, 'Send');
+        }
+    }
+    
+    // Show chat status indicator (above form, floating)
+    function showChatStatus(type, message) {
+        const statusEl = elements.chatStatus || document.getElementById('chatStatus');
+        if (!statusEl) return;
+        
+        // Calculate position based on form position dynamically
+        const form = elements.chatForm;
+        if (form) {
+            const formRect = form.getBoundingClientRect();
+            const distanceFromBottom = window.innerHeight - formRect.top;
+            // Position status indicator above the form (form top + small gap)
+            statusEl.style.bottom = `${distanceFromBottom + 0.5}rem`;
+        }
+        
+        statusEl.className = `chat-status-indicator chat-status-${type} visible`;
+        statusEl.textContent = message;
+        statusEl.setAttribute('role', 'status');
+        statusEl.setAttribute('aria-live', type === 'error' ? 'assertive' : 'polite');
+    }
+    
+    // Hide chat status indicator
+    function hideChatStatus() {
+        const statusEl = elements.chatStatus || document.getElementById('chatStatus');
+        if (!statusEl) return;
+        
+        statusEl.classList.remove('visible');
+        // Clear after animation
+        setTimeout(() => {
+            if (!statusEl.classList.contains('visible')) {
+                statusEl.textContent = '';
+                statusEl.className = 'chat-status-indicator';
+            }
+        }, 300);
+    }
+    
+    // Set up character counter with auto-resize (like TTS tab)
+    function setupCharacterCounter() {
+        if (!elements.chatInput) return;
+        const charCountEl = document.getElementById('chatCharCount');
+        if (!charCountEl) return;
+        
+        // Auto-resize textarea (minimum 3 lines, max 200px)
+        const minHeight = parseFloat(getComputedStyle(elements.chatInput).fontSize) * 1.6 * 3 + 16; // 3 lines + padding
+        const autoResize = () => {
+            elements.chatInput.style.height = 'auto';
+            const newHeight = Math.max(minHeight, Math.min(elements.chatInput.scrollHeight, 200)); // min 3 lines, max 200px
+            elements.chatInput.style.height = `${newHeight}px`;
+        };
+        
+        elements.chatInput.addEventListener('input', () => {
+            const count = elements.chatInput.value.length;
+            if (charCountEl) {
+                charCountEl.textContent = count;
+            }
+            autoResize();
+        });
+        
+        // Initial resize
+        autoResize();
+        if (charCountEl) {
+            charCountEl.textContent = elements.chatInput.value.length;
         }
     }
     
@@ -196,8 +272,8 @@ export function initChatTab(elements, state) {
             addEventListenerWithCleanup(elements.useVoiceModeBtn, 'click', goVoice);
         }
         
-        // Enter key support for chat
-        const keypressHandler = (e) => {
+        // Enter key support for textarea (Shift+Enter for new line, Enter to submit)
+        const keydownHandler = (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 if (elements.chatForm) {
@@ -205,7 +281,7 @@ export function initChatTab(elements, state) {
                 }
             }
         };
-        addEventListenerWithCleanup(elements.chatInput, 'keypress', keypressHandler);
+        addEventListenerWithCleanup(elements.chatInput, 'keydown', keydownHandler);
         
         // Clear and export chat buttons
         addEventListenerWithCleanup(elements.clearChatBtn, 'click', () => {
@@ -215,13 +291,11 @@ export function initChatTab(elements, state) {
             } else {
                 state.currentConversationId = null;
             }
-            showStatus(elements.chatStatus, 'info', 'Chat cleared');
             showToast('success', 'Chat cleared');
         });
         
         addEventListenerWithCleanup(elements.exportChatBtn, 'click', () => {
             exportChat(elements.chatMessages);
-            showStatus(elements.chatStatus, 'success', 'Chat exported!');
             showToast('success', 'Chat exported successfully!');
         });
     }
@@ -237,12 +311,13 @@ export function initChatTab(elements, state) {
         speechRecognition: null,
         vadChecker: null,
         animationFrame: null,
-        transcript: '',
+        transcript: '', // Accumulated transcript across recording sessions
         selectedLanguage: 'en_US',
         recordingStartTime: null,
         recordingTimer: null,
         currentTranscriptMessage: null, // Reference to the real-time transcript message in chat
-        lastTranscriptUpdate: 0
+        lastTranscriptUpdate: 0,
+        accumulatedFinalTranscript: '' // Final transcript parts accumulated across pauses
     };
     
     // Initialize input spectrogram canvas
@@ -353,7 +428,13 @@ export function initChatTab(elements, state) {
     
     // Start recording
     async function startRecording() {
-        if (voiceModeState.isRecording) return;
+        // Prevent race conditions - if already recording or in the process of starting, return
+        if (voiceModeState.isRecording || voiceModeState._isStarting) {
+            return;
+        }
+        
+        // Set flag to prevent concurrent starts
+        voiceModeState._isStarting = true;
         
         try {
             // Request microphone access
@@ -397,12 +478,13 @@ export function initChatTab(elements, state) {
                             // Voice detected
                         },
                         onSilenceDetected: (silenceDuration, audioLevel) => {
-                            console.log('[Dictating Mode] Silence detected, stopping recording', {
+                            console.log('[Dictating Mode] Silence detected, pausing recording', {
                                 silenceDuration,
                                 audioLevel,
                                 transcript: voiceModeState.transcript
                             });
-                            stopRecording();
+                            // Pause recording but don't send message - allow user to continue
+                            pauseRecording();
                         },
                         onSilenceWarning: (silenceDuration) => {
                             // Optional: show warning
@@ -439,7 +521,13 @@ export function initChatTab(elements, state) {
                         }
                     }
                     
-                    voiceModeState.transcript = finalTranscript + interimTranscript;
+                    // Accumulate final transcript parts
+                    if (finalTranscript) {
+                        voiceModeState.accumulatedFinalTranscript += finalTranscript;
+                    }
+                    
+                    // Current transcript is accumulated final + current interim
+                    voiceModeState.transcript = voiceModeState.accumulatedFinalTranscript + interimTranscript;
                     
                     // Update real-time transcript in chat
                     updateRealTimeTranscript(voiceModeState.transcript, interimTranscript.length > 0);
@@ -479,10 +567,17 @@ export function initChatTab(elements, state) {
                 voiceModeState.speechRecognition.onend = () => {
                     if (voiceModeState.isRecording) {
                         // Restart if still recording
+                        // Note: Speech recognition may restart and potentially return duplicate results
+                        // The accumulatedFinalTranscript should prevent duplication of final results
                         try {
                             voiceModeState.speechRecognition.start();
                         } catch (e) {
                             console.error('Error restarting speech recognition:', e);
+                            // If restart fails, try to recover by stopping and letting user restart
+                            if (e.name === 'InvalidStateError' || e.name === 'NotAllowedError') {
+                                console.warn('[Dictating Mode] Speech recognition restart failed, pausing recording');
+                                pauseRecording();
+                            }
                         }
                     }
                 };
@@ -510,8 +605,11 @@ export function initChatTab(elements, state) {
             voiceModeState.recordingStartTime = Date.now();
             startRecordingTimer();
             
-            // Clear any previous transcript message
-            clearRealTimeTranscript();
+            // Don't clear transcript message - we want to continue updating it
+            // If there's no transcript message yet, one will be created when first transcript arrives
+            
+            // Clear the starting flag
+            voiceModeState._isStarting = false;
             
             console.log('[Dictating Mode] Recording started');
             showToast('success', 'Recording started');
@@ -523,6 +621,7 @@ export function initChatTab(elements, state) {
             
             // Reset recording state on error
             voiceModeState.isRecording = false;
+            voiceModeState._isStarting = false;
             stopRecordingTimer();
             
             updateVoiceModeStatus('Click microphone to start recording', false);
@@ -532,9 +631,83 @@ export function initChatTab(elements, state) {
         }
     }
     
-    // Stop recording
-    function stopRecording() {
+    // Pause recording (on silence) - don't send message, allow continuation
+    function pauseRecording() {
         if (!voiceModeState.isRecording) return;
+        
+        voiceModeState.isRecording = false;
+        
+        // Stop speech recognition
+        if (voiceModeState.speechRecognition) {
+            try {
+                voiceModeState.speechRecognition.stop();
+            } catch (e) {
+                console.error('Error stopping speech recognition:', e);
+            }
+            voiceModeState.speechRecognition = null;
+        }
+        
+        // Stop VAD
+        if (voiceModeState.vadChecker) {
+            voiceModeState.vadChecker.stop();
+            voiceModeState.vadChecker = null;
+        }
+        
+        // Stop visualization
+        stopAudioVisualization();
+        
+        // Stop media stream
+        if (voiceModeState.mediaStream) {
+            voiceModeState.mediaStream.getTracks().forEach(track => track.stop());
+            voiceModeState.mediaStream = null;
+        }
+        
+        // Close audio context
+        if (voiceModeState.audioContext) {
+            voiceModeState.audioContext.close();
+            voiceModeState.audioContext = null;
+        }
+        
+        voiceModeState.analyser = null;
+        voiceModeState.dataArray = null;
+        
+        // Stop recording timer
+        stopRecordingTimer();
+        
+        // Update UI - show paused state but keep transcript visible
+        updateVoiceModeStatus('Paused - click microphone to continue', false);
+        
+        // Keep transcript message visible - don't remove it
+        // Update transcript message to show it's paused (but keep content)
+        if (voiceModeState.currentTranscriptMessage) {
+            const messageContent = voiceModeState.currentTranscriptMessage.querySelector('.message-content');
+            if (messageContent) {
+                messageContent.style.opacity = '0.8';
+                messageContent.style.fontStyle = 'normal';
+            }
+        }
+        
+        console.log('[Dictating Mode] Recording paused', {
+            transcript: voiceModeState.transcript.trim(),
+            accumulatedFinal: voiceModeState.accumulatedFinalTranscript.trim()
+        });
+    }
+    
+    // Stop recording (explicit stop by user) - send message
+    function stopRecording() {
+        if (!voiceModeState.isRecording) {
+            // If already paused, send the accumulated message
+            const finalTranscript = voiceModeState.transcript.trim() || voiceModeState.accumulatedFinalTranscript.trim();
+            if (finalTranscript) {
+                console.log('[Dictating Mode] Sending accumulated message:', finalTranscript);
+                sendVoiceMessage(finalTranscript);
+                // Clear transcript state after sending
+                voiceModeState.transcript = '';
+                voiceModeState.accumulatedFinalTranscript = '';
+                clearRealTimeTranscript();
+            }
+            return;
+        }
         
         voiceModeState.isRecording = false;
         
@@ -579,7 +752,7 @@ export function initChatTab(elements, state) {
         updateVoiceModeStatus('Click microphone to start recording', false);
         
         // Send message if we have a transcript
-        const finalTranscript = voiceModeState.transcript.trim();
+        const finalTranscript = voiceModeState.transcript.trim() || voiceModeState.accumulatedFinalTranscript.trim();
         console.log('[Dictating Mode] Recording stopped', {
             transcript: finalTranscript,
             hasTranscript: !!finalTranscript
@@ -608,8 +781,9 @@ export function initChatTab(elements, state) {
             showToast('info', 'No speech detected');
         }
         
-        // Clear transcript
+        // Clear transcript for next session
         voiceModeState.transcript = '';
+        voiceModeState.accumulatedFinalTranscript = '';
         clearRealTimeTranscript();
     }
     
@@ -633,6 +807,10 @@ export function initChatTab(elements, state) {
             voiceModeState.currentTranscriptMessage.remove();
             voiceModeState.currentTranscriptMessage = null;
         }
+        
+        // Clear transcript state after sending (in case sendVoiceMessage is called directly)
+        voiceModeState.transcript = '';
+        voiceModeState.accumulatedFinalTranscript = '';
         
         // Add user message to chat (final version)
         addChatMessage(elements.chatMessages, 'user', message);
@@ -756,17 +934,34 @@ export function initChatTab(elements, state) {
                 voiceModeState.currentTranscriptMessage.classList.add('voice-transcript-message');
             }
         } else {
-            // Update existing message
-            const messageContent = voiceModeState.currentTranscriptMessage.querySelector('.message-content');
-            if (messageContent) {
-                messageContent.textContent = transcript;
-                if (isInterim) {
-                    messageContent.style.opacity = '0.7';
-                    messageContent.style.fontStyle = 'italic';
-                } else {
-                    messageContent.style.opacity = '1';
-                    messageContent.style.fontStyle = 'normal';
+            // Check if message still exists in DOM (might have been removed)
+            if (!voiceModeState.currentTranscriptMessage.parentNode) {
+                // Message was removed, create a new one
+                voiceModeState.currentTranscriptMessage = addChatMessage(
+                    elements.chatMessages,
+                    'user',
+                    transcript,
+                    null,
+                    'sending'
+                );
+                if (voiceModeState.currentTranscriptMessage) {
+                    voiceModeState.currentTranscriptMessage.classList.add('voice-transcript-message');
                 }
+            } else {
+                // Update existing message
+                const messageContent = voiceModeState.currentTranscriptMessage.querySelector('.message-content');
+                if (messageContent) {
+                    messageContent.textContent = transcript;
+                    if (isInterim) {
+                        messageContent.style.opacity = '0.7';
+                        messageContent.style.fontStyle = 'italic';
+                    } else {
+                        messageContent.style.opacity = '1';
+                        messageContent.style.fontStyle = 'normal';
+                    }
+                }
+                // Make sure message is visible (in case it was hidden)
+                voiceModeState.currentTranscriptMessage.style.display = '';
             }
         }
         
@@ -846,7 +1041,7 @@ export function initChatTab(elements, state) {
         
         voiceModeState.isActive = true;
         
-        // Show compact dictating mode controls
+        // Show compact dictating mode controls (they're visible by default now)
         if (elements.voiceModeControls) {
             elements.voiceModeControls.classList.remove('hidden');
         }
@@ -885,9 +1080,19 @@ export function initChatTab(elements, state) {
     function exitVoiceMode() {
         if (!voiceModeState.isActive) return;
         
-        // Stop recording if active
+        // Stop recording if active, or send accumulated message if paused
         if (voiceModeState.isRecording) {
             stopRecording();
+        } else {
+            // If paused, send accumulated message before exiting
+            const finalTranscript = voiceModeState.transcript.trim() || voiceModeState.accumulatedFinalTranscript.trim();
+            if (finalTranscript) {
+                sendVoiceMessage(finalTranscript);
+                // sendVoiceMessage already clears transcript state, but ensure it's cleared
+                voiceModeState.transcript = '';
+                voiceModeState.accumulatedFinalTranscript = '';
+                clearRealTimeTranscript();
+            }
         }
         
         // Clean up
@@ -951,6 +1156,8 @@ export function initChatTab(elements, state) {
         voiceModeState.dataArray = null;
         voiceModeState.vadChecker = null;
         voiceModeState.transcript = '';
+        voiceModeState.accumulatedFinalTranscript = '';
+        voiceModeState._isStarting = false;
         
         // Remove recording visual feedback
         updateVoiceModeStatus('Click microphone to start recording', false);
@@ -971,8 +1178,10 @@ export function initChatTab(elements, state) {
             if (voiceModeState.isActive) {
                 // If dictating mode is active, toggle recording
                 if (voiceModeState.isRecording) {
+                    // Stop and send message
                     stopRecording();
                 } else {
+                    // Resume recording (continue with existing transcript)
                     startRecording();
                 }
             } else {
@@ -993,6 +1202,7 @@ export function initChatTab(elements, state) {
     }
     
     // Initialize
+    setupCharacterCounter();
     setupEventListeners();
     setupVoiceFeatures();
     

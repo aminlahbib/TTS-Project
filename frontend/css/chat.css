@@ -324,6 +324,7 @@
 .chat-form-input-wrapper {
     position: relative;
     display: flex;
+    flex-direction: row;
     align-items: center;
     gap: 0.5rem;
     max-width: 768px;
@@ -380,17 +381,36 @@
     color: var(--text);
     font-size: 0.95rem;
     padding: 0.5rem 0.75rem;
+    padding-right: 4rem; /* Space for character counter */
     outline: none;
     resize: none;
     max-height: 200px;
     overflow-y: auto;
     font-family: inherit;
+    line-height: 1.5;
+    min-height: 24px;
+    height: auto;
     position: relative;
     z-index: 2;
+    width: 100%;
 }
 
 #chatInput::placeholder {
     color: var(--text-dim);
+}
+
+/* Character counter for chat input - positioned inside textarea */
+.chat-char-count {
+    position: absolute;
+    bottom: 0.25rem;
+    right: 0.5rem;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    pointer-events: none;
+    z-index: 3;
+    background: rgba(21, 20, 20, 0.8);
+    padding: 0.125rem 0.25rem;
+    border-radius: 0.25rem;
 }
 
 /* Spectrogram inside input field */
@@ -413,6 +433,48 @@
     display: none;
 }
 
+.chat-voice-toggle-btn {
+    flex-shrink: 0;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.chat-voice-toggle-btn:hover {
+    background: var(--surface-light);
+    color: var(--text);
+}
+
+#useVoiceModeBtn {
+    flex-shrink: 0;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+#useVoiceModeBtn:hover {
+    background: var(--surface-light);
+    color: var(--text);
+}
+
 .chat-send-btn {
     flex-shrink: 0;
     width: 2rem;
@@ -427,6 +489,7 @@
     align-items: center;
     justify-content: center;
     transition: all 0.2s ease;
+    position: relative;
 }
 
 .chat-send-btn:hover:not(:disabled) {
@@ -435,8 +498,46 @@
 }
 
 .chat-send-btn:disabled {
-    opacity: 0.5;
+    opacity: 0.7;
     cursor: not-allowed;
+    background: var(--primary);
+}
+
+/* Loading spinner animation for send button */
+.chat-send-btn .btn-spinner {
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+.chat-send-btn .btn-spinner.hidden {
+    display: none;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Pulse animation for sending state */
+.chat-send-btn:disabled {
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 0.7;
+        box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4);
+    }
+    50% {
+        opacity: 1;
+        box-shadow: 0 0 0 4px rgba(99, 102, 241, 0);
+    }
 }
 
 /* Compact Voice Mode Controls */
@@ -1072,13 +1173,56 @@
     transform: scale(1.05);
 }
 
-/* Status container */
-#chatStatus {
+/* Floating status indicator above form */
+.chat-status-indicator {
+    position: fixed;
+    bottom: 80px; /* Default position, will be updated by JS */
+    left: 50%;
+    transform: translateX(-50%) translateY(0);
     max-width: 768px;
-    margin: 0.5rem auto 0;
-    padding: 0 1rem;
-    flex-shrink: 0;
-    order: 2;
+    width: calc(100% - 2rem);
+    padding: 0.5rem 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    font-size: 0.875rem;
+    text-align: center;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+    z-index: 101;
+    pointer-events: none;
+    backdrop-filter: blur(10px);
+    background: rgba(21, 20, 20, 0.95);
+}
+
+.chat-status-indicator.visible {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(-0.5rem);
+}
+
+.chat-status-indicator.chat-status-info {
+    color: var(--text);
+    border-color: var(--primary);
+}
+
+.chat-status-indicator.chat-status-success {
+    color: #10b981;
+    border-color: #10b981;
+    background: rgba(16, 185, 129, 0.1);
+}
+
+.chat-status-indicator.chat-status-error {
+    color: #ef4444;
+    border-color: #ef4444;
+    background: rgba(239, 68, 68, 0.1);
+}
+
+/* Adjust form position to account for status indicator */
+.chat-form {
+    margin-bottom: 0;
 }
 
 /* Responsive */
