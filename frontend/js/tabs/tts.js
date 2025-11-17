@@ -220,19 +220,27 @@ export function initTtsTab(elements, state) {
                 elements.ttsDownloadBtn.style.display = 'block';
             }
             
-            // Set up custom audio player
+            // Show audio player wrapper FIRST (before generating waveform)
+            // This ensures canvas has valid dimensions (offsetWidth > 0)
+            const audioWrapper = document.getElementById('ttsAudioWrapper');
+            if (audioWrapper) {
+                audioWrapper.classList.remove('hidden');
+            } else if (elements.ttsAudioPlayer) {
+                elements.ttsAudioPlayer.classList.remove('hidden');
+            }
+            
+            // Wait a frame to ensure DOM has updated and canvas dimensions are available
+            await new Promise(resolve => requestAnimationFrame(resolve));
+            
+            // Set up custom audio player (now that wrapper is visible)
             console.log('[TTS] Setting up audio player...');
             await setupAudioPlayer(elements, data.audio_base64);
             console.log('[TTS] Audio player setup complete');
             
-            // Show audio player wrapper and scroll to it
-            const audioWrapper = document.getElementById('ttsAudioWrapper');
+            // Scroll to audio player smoothly after everything is set up
             if (audioWrapper) {
-                audioWrapper.classList.remove('hidden');
-                // Scroll to audio player smoothly
                 audioWrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
             } else if (elements.ttsAudioPlayer) {
-                elements.ttsAudioPlayer.classList.remove('hidden');
                 elements.ttsAudioPlayer.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
             

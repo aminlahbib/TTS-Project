@@ -110,13 +110,66 @@ export async function playAudio(audioElement, base64Data) {
  */
 export async function generateWaveform(audioBlob, canvas, height = null) {
     try {
+        // Ensure canvas is visible and has valid dimensions
+        if (!canvas || !canvas.parentElement) {
+            console.warn('[Waveform] Canvas or parent element not found');
+            return;
+        }
+        
+        // Check if canvas is in a hidden container and wait for it to be visible
+        const container = canvas.closest('.hidden');
+        if (container && container.classList.contains('hidden')) {
+            console.warn('[Waveform] Canvas is in hidden container, waiting for visibility...');
+            // Wait for container to become visible
+            await new Promise(resolve => {
+                const checkVisibility = () => {
+                    if (!container.classList.contains('hidden') && canvas.offsetWidth > 0) {
+                        resolve();
+                    } else {
+                        requestAnimationFrame(checkVisibility);
+                    }
+                };
+                // Start checking
+                requestAnimationFrame(checkVisibility);
+                // Timeout after 2 seconds
+                setTimeout(() => {
+                    console.warn('[Waveform] Timeout waiting for canvas visibility');
+                    resolve();
+                }, 2000);
+            });
+        }
+        
+        // Get canvas dimensions - ensure we have valid width
+        // Wait a frame to ensure layout has settled
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        
+        let width = canvas.offsetWidth;
+        if (width === 0 || !width) {
+            // Canvas might not be visible yet, try to get from parent or use default
+            const parent = canvas.parentElement;
+            if (parent && parent.offsetWidth > 0) {
+                width = parent.offsetWidth;
+                console.warn('[Waveform] Using parent width:', width);
+            } else {
+                // Try to get from container
+                const waveformContainer = canvas.closest('.audio-waveform-container');
+                if (waveformContainer && waveformContainer.offsetWidth > 0) {
+                    width = waveformContainer.offsetWidth;
+                    console.warn('[Waveform] Using container width:', width);
+                } else {
+                    width = 800; // Fallback to 800px
+                    console.warn('[Waveform] Canvas width was 0, using fallback:', width);
+                }
+            }
+        }
+        
         const arrayBuffer = await audioBlob.arrayBuffer();
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
         
         const ctx = canvas.getContext('2d');
-        const width = canvas.width = canvas.offsetWidth;
-        const canvasHeight = height || (canvas.height = canvas.offsetHeight);
+        canvas.width = width;
+        const canvasHeight = height || (canvas.height = canvas.offsetHeight || 60);
         
         // Store audio buffer and duration for seeking
         canvas._audioBuffer = audioBuffer;
@@ -178,20 +231,20 @@ export async function generateWaveform(audioBlob, canvas, height = null) {
         ctx.fillStyle = gradient;
         ctx.fill();
         
-        // Add strong stroke for better definition and visibility
-        ctx.strokeStyle = '#818cf8'; // Lighter indigo for stroke
-        ctx.lineWidth = 2;
+        // Add subtle stroke for definition (much more subtle)
+        ctx.strokeStyle = 'rgba(129, 140, 248, 0.3)'; // Very subtle indigo stroke
+        ctx.lineWidth = 0.5;
         ctx.stroke();
         
-        // Add bright highlight overlay for maximum visibility
+        // Add very subtle highlight overlay for gentle 3D effect
         const highlightGradient = ctx.createLinearGradient(0, 0, 0, canvasHeight);
-        highlightGradient.addColorStop(0, 'rgba(255, 255, 255, 0.25)');
-        highlightGradient.addColorStop(0.2, 'rgba(255, 255, 255, 0.15)');
-        highlightGradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.05)');
+        highlightGradient.addColorStop(0, 'rgba(255, 255, 255, 0.06)'); // Much more subtle
+        highlightGradient.addColorStop(0.15, 'rgba(255, 255, 255, 0.03)');
+        highlightGradient.addColorStop(0.4, 'rgba(255, 255, 255, 0.01)');
         highlightGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
         
-        // Apply highlight overlay using lighter blend mode
-        ctx.globalCompositeOperation = 'lighten';
+        // Apply subtle highlight overlay with soft blend
+        ctx.globalCompositeOperation = 'overlay'; // More subtle than 'lighten'
         ctx.fillStyle = highlightGradient;
         ctx.fillRect(0, 0, width, canvasHeight);
         ctx.globalCompositeOperation = 'source-over';

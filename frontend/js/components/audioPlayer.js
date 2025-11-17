@@ -233,12 +233,31 @@ export async function setupAudioPlayer(elements, base64Data) {
             elements.ttsAudio.playbackRate = AUDIO.DEFAULT_SPEED;
         }
         
-        // Generate waveform
+        // Generate waveform - ensure canvas is visible first
         if (elements.ttsWaveform) {
+            // Double-check canvas is visible and has dimensions
+            const waveformContainer = elements.ttsWaveform.closest('.audio-waveform-container');
+            if (waveformContainer && waveformContainer.offsetWidth === 0) {
+                // Wait a bit more for layout to settle
+                await new Promise(resolve => {
+                    requestAnimationFrame(() => {
+                        requestAnimationFrame(resolve);
+                    });
+                });
+            }
+            
+            // Generate waveform
             await generateWaveform(audioBlob, elements.ttsWaveform);
             
             // Setup waveform interactivity (click to seek, hover tooltip)
+            // Remove old listeners if they exist to prevent duplicates
+            const canvas = elements.ttsWaveform;
+            if (canvas._interactivitySetup) {
+                // Clean up old listeners if any
+                canvas._interactivitySetup = false;
+            }
             setupWaveformInteractivity(elements.ttsWaveform, elements.ttsAudio);
+            canvas._interactivitySetup = true;
         }
         
         // Auto-play audio after it's loaded
