@@ -118,14 +118,27 @@ export async function generateWaveform(audioBlob, canvas, height = null) {
         const width = canvas.width = canvas.offsetWidth;
         const canvasHeight = height || (canvas.height = canvas.offsetHeight);
         
+        // Store audio buffer and duration for seeking
+        canvas._audioBuffer = audioBuffer;
+        canvas._duration = audioBuffer.duration;
+        
         const data = audioBuffer.getChannelData(0);
         const step = Math.ceil(data.length / width);
         const amp = canvasHeight / 2;
         
-        ctx.fillStyle = '#e5e7eb';
+        // Clear with light background for better contrast
+        ctx.fillStyle = '#1f1f1f'; // Dark gray background (matches surface-lighter)
         ctx.fillRect(0, 0, width, canvasHeight);
         
-        ctx.fillStyle = '#6366f1';
+        // Draw center line for reference
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, amp);
+        ctx.lineTo(width, amp);
+        ctx.stroke();
+        
+        // Create waveform path
         ctx.beginPath();
         ctx.moveTo(0, amp);
         
@@ -148,26 +161,51 @@ export async function generateWaveform(audioBlob, canvas, height = null) {
         
         ctx.lineTo(width, amp);
         ctx.closePath();
-        ctx.fill();
         
-        // Add gradient overlay
+        // Add gradient overlay with better opacity for visibility
         const gradient = ctx.createLinearGradient(0, 0, 0, canvasHeight);
         if (height) {
-            // Streaming waveform colors
-            gradient.addColorStop(0, 'rgba(99, 102, 241, 0.8)');
-            gradient.addColorStop(0.5, 'rgba(139, 92, 246, 0.6)');
-            gradient.addColorStop(1, 'rgba(168, 85, 247, 0.8)');
+            // Streaming waveform colors - more vibrant
+            gradient.addColorStop(0, 'rgba(99, 102, 241, 1.0)');      // Indigo - full opacity
+            gradient.addColorStop(0.5, 'rgba(139, 92, 246, 0.9)');    // Purple
+            gradient.addColorStop(1, 'rgba(168, 85, 247, 1.0)');      // Purple - full opacity
         } else {
-            // TTS waveform colors
-            gradient.addColorStop(0, 'rgba(99, 102, 241, 0.8)');
-            gradient.addColorStop(0.5, 'rgba(168, 85, 247, 0.6)');
-            gradient.addColorStop(1, 'rgba(20, 184, 166, 0.8)');
+            // TTS waveform colors - more vibrant
+            gradient.addColorStop(0, 'rgba(99, 102, 241, 1.0)');      // Indigo - full opacity
+            gradient.addColorStop(0.5, 'rgba(168, 85, 247, 0.9)');    // Purple
+            gradient.addColorStop(1, 'rgba(20, 184, 166, 1.0)');      // Teal - full opacity
         }
         ctx.fillStyle = gradient;
         ctx.fill();
         
+        // Add subtle stroke for better definition
+        ctx.strokeStyle = 'rgba(99, 102, 241, 0.5)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        
     } catch (error) {
         console.error('Waveform generation error:', error);
     }
+}
+
+/**
+ * Update waveform progress indicator
+ */
+export function updateWaveformProgress(canvas, container, currentTime, duration) {
+    if (!canvas || !container || !duration) return;
+    
+    const progress = (currentTime / duration) * 100;
+    
+    // Update progress overlay
+    container.style.setProperty('--progress', `${progress}%`);
+    
+    // Update or create progress line
+    let progressLine = container.querySelector('.audio-waveform-progress-line');
+    if (!progressLine) {
+        progressLine = document.createElement('div');
+        progressLine.className = 'audio-waveform-progress-line';
+        container.appendChild(progressLine);
+    }
+    progressLine.style.left = `${progress}%`;
 }
 
