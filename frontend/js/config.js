@@ -117,16 +117,6 @@ export const CONFIG = {
     get API_BASE() { return getApiBaseLazy(); },
     get WS_BASE() { return getWebSocketBaseLazy(); },
     
-    // Streaming Configuration
-    STREAMING: {
-        MAX_AUDIO_SAMPLES: 10_000_000, // ~7.5 minutes at 22kHz (safety limit)
-        MAX_MEL_FRAMES: 50000, // Limit mel frames accumulation
-        RECONNECT_ATTEMPTS: 3,
-        RECONNECT_DELAY: 1000, // ms
-        DEFAULT_SAMPLE_RATE: 22050,
-        FRAME_WIDTH: 2, // pixels per frame in spectrogram
-    },
-    
     // VAD Configuration
     VAD: {
         ENABLED: true,

@@ -1,4 +1,3 @@
-mod stream;
 mod wav;
 mod melspec;
 

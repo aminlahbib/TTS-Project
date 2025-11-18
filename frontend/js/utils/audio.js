@@ -218,7 +218,7 @@ export async function generateWaveform(audioBlob, canvas, height = null) {
         // Draw waveform with much brighter, more visible colors
         const gradient = ctx.createLinearGradient(0, 0, 0, canvasHeight);
         if (height) {
-            // Streaming waveform colors - very bright and visible
+            // Waveform colors - very bright and visible
             gradient.addColorStop(0, '#6366f1');      // Indigo - solid color
             gradient.addColorStop(0.5, '#8b5cf6');    // Purple - solid color
             gradient.addColorStop(1, '#a855f7');      // Purple - solid color

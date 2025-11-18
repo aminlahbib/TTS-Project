@@ -9,7 +9,6 @@ import { setupCustomAudioPlayer, downloadAudio } from './components/audioPlayer.
 import { scrollChatToBottom } from './components/chat.js';
 import { getVoices, getVoiceDetails, checkServerHealth } from './services/api.js';
 import { initTtsTab } from './tabs/tts.js';
-import { initStreamTab } from './tabs/stream.js';
 import { initChatTab } from './tabs/chat.js';
 import { initServerTab } from './tabs/server.js';
 import { initVoiceChatTab } from './tabs/voice-chat.js';
@@ -17,21 +16,14 @@ import { initVoiceChatTab } from './tabs/voice-chat.js';
 // Global state
 let elements = {};
 let voices = []; // Simple language codes list (for voiceModeLanguage in chat tab)
-let voiceDetails = []; // Full voice details (for TTS, Stream, Voice-chat tabs)
+let voiceDetails = []; // Full voice details (for TTS, Voice-chat tabs)
 let currentAudioBlob = null;
-let currentStreamAudioBlob = null;
 let currentConversationId = null;
-let isStreaming = false;
-let currentWebSocket = null;
 const initializedTabs = new Set(); // Track initialized tabs
 
 // State management functions
 function setCurrentAudioBlob(blob) {
     currentAudioBlob = blob;
-}
-
-function setCurrentStreamAudioBlob(blob) {
-    currentStreamAudioBlob = blob;
 }
 
 function setCurrentConversationId(id) {
@@ -140,23 +132,6 @@ async function init() {
                 // Populate voice dropdown for TTS tab
                 if (ttsTab && ttsTab.populateVoiceDropdown && voiceDetails && voiceDetails.length > 0) {
                     ttsTab.populateVoiceDropdown();
-                }
-                initializedTabs.add(tabName);
-            }
-            if (tabName === 'stream') {
-                // Initialize stream tab
-                const streamState = {
-                    get isStreaming() { return isStreaming; },
-                    set isStreaming(value) { isStreaming = value; },
-                    get currentWebSocket() { return currentWebSocket; },
-                    set currentWebSocket(value) { currentWebSocket = value; },
-                    setCurrentStreamAudioBlob,
-                    voiceDetails
-                };
-                const streamTab = initStreamTab(elements, streamState);
-                // Populate voice dropdown for stream tab
-                if (streamTab && streamTab.populateVoiceDropdown && voiceDetails && voiceDetails.length > 0) {
-                    streamTab.populateVoiceDropdown();
                 }
                 initializedTabs.add(tabName);
             }
@@ -276,21 +251,6 @@ function setupDownloadHandlers() {
         });
     }
     
-    // Stream download button
-    if (elements.streamDownloadBtn) {
-        elements.streamDownloadBtn.addEventListener('click', () => {
-            try {
-                if (currentStreamAudioBlob) {
-                    downloadAudio(currentStreamAudioBlob, `stream-${Date.now()}.wav`);
-                    showToast('success', 'Streaming audio downloaded successfully!');
-                } else {
-                    showToast('error', 'No audio to download');
-                }
-            } catch (error) {
-                showToast('error', `Download failed: ${error.message}`);
-            }
-        });
-    }
 }
 
 // Server Status Functions (called from main init)

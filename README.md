@@ -46,46 +46,106 @@ Rust workspace with three crates:
 
 ## Features
 
-**TTS:** Multilingual support, model caching, speaker selection, WAV/base64 output, mel spectrograms
+### Text-to-Speech (TTS)
+- **Multilingual Support**: 7+ languages (English, German, French, Dutch, Spanish, Italian, Ukrainian)
+- **Multiple Voices**: Multiple voices per language with metadata (gender, quality)
+- **Model Caching**: Efficient in-memory model caching for fast synthesis
+- **Audio Formats**: WAV output with base64 encoding
+- **Mel Spectrograms**: Real-time mel spectrogram generation for visualization
+- **Real-time Streaming**: WebSocket-based streaming with progressive audio chunks
 
-**LLM:** OpenAI and Ollama support, stateful conversations with Qdrant storage
+### LLM Integration
+- **Multiple Providers**: OpenAI API and Ollama (local) support
+- **Conversation History**: Stateful conversations with context management
+- **Qdrant Storage**: Optional vector database storage for conversation persistence
+- **Streaming Support**: Real-time token streaming for responsive chat experience
+- **Text Cleaning**: Automatic markdown removal and formatting for natural TTS speech
 
-**API:** REST endpoints, WebSocket streaming, input validation, CORS, structured logging
+### API & Infrastructure
+- **REST API**: Comprehensive REST endpoints for TTS and chat
+- **WebSocket Streaming**: Real-time audio and text streaming
+- **Input Validation**: Robust request validation with helpful error messages
+- **Rate Limiting**: Configurable rate limiting (default: 60 req/min)
+- **CORS Support**: Configurable CORS for cross-origin requests
+- **Structured Logging**: Comprehensive logging with tracing
+- **Metrics**: System metrics endpoint (CPU, memory, request count, uptime)
 
 ## API Endpoints
 
+### REST Endpoints
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/health` | Health check |
-| `GET` | `/voices` | List available languages |
-| `GET` | `/voices/detail` | Detailed voice info |
-| `POST` | `/tts` | Synthesize speech |
-| `POST` | `/chat` | Chat with LLM |
-| `POST` | `/voice-chat` | Chat with audio response |
-| `WS` | `/stream/{lang}/{text}` | WebSocket TTS streaming |
-| `WS` | `/ws/chat/stream` | WebSocket chat streaming |
-| `GET` | `/metrics` | Server metrics |
+| `GET` | `/health` / `/healthz` | Health check |
+| `GET` | `/voices` | List available language codes |
+| `GET` | `/voices/detail` | Detailed voice information (all voices with metadata) |
+| `POST` | `/tts` | Synthesize speech (returns base64 WAV) |
+| `POST` | `/chat` | Chat with LLM (text response) |
+| `POST` | `/voice-chat` | Chat with LLM (text + audio response) |
+| `GET` | `/metrics` | Server metrics (CPU, memory, request count, uptime) |
 
-See [API Reference](docs/API.md) for details.
+### WebSocket Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `WS /stream/{lang}/{text}?voice={voice_id}` | Real-time TTS audio streaming with mel spectrogram |
+| `WS /ws/chat/stream?message={text}&conversation_id={id}&language={lang}` | Streaming chat (LLM tokens + TTS audio chunks) |
+
+**Note:** All REST endpoints are also available under `/api` prefix.
+
+See [API Reference](docs/API.md) for complete documentation, request/response formats, and examples.
 
 ## Configuration
+
+### Server Configuration
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `PORT` | No | `8085` | Server port |
-| `OPENAI_API_KEY` | Yes* | - | OpenAI API key (*for OpenAI provider) |
-| `LLM_PROVIDER` | No | `openai` | `openai` or `ollama` |
-| `LLM_MODEL` | No | `gpt-3.5-turbo` | Model name |
-| `QDRANT_URL` | No | - | Qdrant server URL (optional, must not be empty) |
 | `RATE_LIMIT_PER_MINUTE` | No | `60` | Rate limit per minute |
-| `RUST_LOG` | No | `info` | Log level |
+| `LLM_TIMEOUT_SECS` | No | `120` | LLM request timeout (seconds) |
+| `REQUEST_TIMEOUT_SECS` | No | `60` | General request timeout (seconds) |
+| `CORS_ALLOWED_ORIGINS` | No | - | Comma-separated list of allowed origins |
+| `RUST_LOG` | No | `info` | Log level (trace, debug, info, warn, error) |
+
+### LLM Configuration
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `LLM_PROVIDER` | No | `openai` | `openai` or `ollama` |
+| `LLM_MODEL` | No | `gpt-3.5-turbo` | Model name (varies by provider) |
+| `OPENAI_API_KEY` | Yes* | - | OpenAI API key (*required for OpenAI provider) |
+| `OPENAI_ORG_ID` | No | - | OpenAI organization ID (optional) |
+| `OLLAMA_BASE_URL` | No | `http://localhost:11434` | Ollama server URL |
+| `QDRANT_URL` | No | - | Qdrant server URL (optional, must not be empty if set) |
+| `QDRANT_API_KEY` | No | - | Qdrant API key (optional) |
+
+### TTS Configuration
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
 | `PIPER_ESPEAKNG_DATA_DIRECTORY` | No | `/usr/share` | eSpeak-ng data directory (auto-set in Docker) |
+
+**Model Configuration:** Voice models are configured in `models/map.json`. See [Architecture](docs/ARCHITECTURE.md#model-configuration) for details.
 
 ## Requirements
 
-- **Docker** (recommended) or **Rust** 1.70+ ([rustup.rs](https://rustup.rs))
-- **Piper Models** (~70MB each, download separately)
-- **OpenAI API Key** (required for chat, optional for TTS only)
+### For Docker Deployment
+- **Docker** and **Docker Compose**
+- **Piper TTS Models** (~70MB each, download separately)
+- **OpenAI API Key** (for OpenAI provider) or **Ollama** (for local LLM)
+
+### For Local Development
+- **Rust** 1.70+ ([rustup.rs](https://rustup.rs))
+- **Piper TTS Models** (~70MB each, download separately)
+- **OpenAI API Key** (for OpenAI provider) or **Ollama** (for local LLM)
+- **Python 3** (for frontend development server, optional)
+
+### Model Setup
+1. Download Piper models from [Piper releases](https://github.com/rhasspy/piper/releases)
+2. Place models in `./models/{language}/{voice}/` directory
+3. Update `models/map.json` with model paths
+4. Verify with: `python3 scripts/check_models.py`
 
 ## Docker
 
