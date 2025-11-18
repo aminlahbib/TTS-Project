@@ -14,7 +14,6 @@ use num_complex::Complex;
 use serde::{Deserialize, Serialize};
 use piper_rs::synth::{PiperSpeechStreamParallel, PiperSpeechSynthesizer};
 use dashmap::DashMap;
-use lru::LruCache;
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -282,8 +281,8 @@ impl TtsManager {
         if self.cache.len() >= self.max_cache_size {
             // Remove a random entry (simple eviction strategy)
             // In production, you might want to track access order
-            if let Some((key, _)) = self.cache.iter().next() {
-                let key_to_remove = key.key().clone();
+            if let Some(entry) = self.cache.iter().next() {
+                let key_to_remove = entry.key().clone();
                 self.cache.remove(&key_to_remove);
             }
         }

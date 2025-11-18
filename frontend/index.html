@@ -27,11 +27,30 @@
 
     <main class="main-content">
         <header class="header">
-            <h1 id="pageTitle">Text-to-Speech</h1>
-            <p id="pageDescription">Convert text to natural-sounding speech</p>
-            <div class="status-badge" id="serverStatus">
-                <span class="status-dot"></span>
-                <span>Checking...</span>
+            <div class="header-top">
+                <div class="header-left">
+                    <div>
+                        <h1 id="pageTitle">Text-to-Speech</h1>
+                        <p id="pageDescription">Convert text to natural-sounding speech</p>
+                    </div>
+                    <div class="status-badge" id="serverStatus">
+                        <span class="status-dot"></span>
+                        <span>Checking...</span>
+                    </div>
+                </div>
+                <div class="header-controls">
+                    <div class="llm-provider-selector">
+                        <label for="llmProvider">LLM Provider:</label>
+                        <select id="llmProvider" class="provider-select">
+                            <option value="ollama" selected>Local (Ollama)</option>
+                            <option value="openai">OpenAI</option>
+                        </select>
+                    </div>
+                    <div class="status-badge" id="llmStatus" style="display: none;">
+                        <span class="status-dot"></span>
+                        <span>Checking...</span>
+                    </div>
+                </div>
             </div>
         </header>
 

@@ -1,11 +1,7 @@
-pub mod error;
-pub mod validation;
-pub mod config;
-
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
-    extract::{Path, Request, State, WebSocketUpgrade},
+    extract::{Request, State, WebSocketUpgrade},
     middleware::Next,
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -21,12 +17,16 @@ use tracing::{error, info, warn};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use llm_core::{LlmClient, LlmProvider};
-use futures_util::SinkExt;
+
+mod error;
+mod validation;
+mod config;
+mod metrics;
 
 use crate::error::ApiError;
 use crate::validation::{validate_chat_request, validate_conversation_id, validate_tts_request};
 use crate::config::ServerConfig;
-use crate::metrics::{AppMetrics, EndpointMetrics, TtsMetrics, LlmMetrics};
+use crate::metrics::AppMetrics;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -98,10 +98,10 @@ async fn main() -> anyhow::Result<()> {
 async fn async_main() -> anyhow::Result<()> {
     info!("Starting TTS/LLM server...");
 
-    let provider_env = std::env::var("LLM_PROVIDER").unwrap_or_else(|_| "openai".into());
+    let provider_env = std::env::var("LLM_PROVIDER").unwrap_or_else(|_| "ollama".into());
     let provider = match provider_env.as_str() {
-        "ollama" => LlmProvider::Ollama,
-        _ => LlmProvider::OpenAI,
+        "openai" => LlmProvider::OpenAI,
+        _ => LlmProvider::Ollama, // Default to Ollama
     };
     let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| match provider {
         LlmProvider::OpenAI => "gpt-3.5-turbo".into(),

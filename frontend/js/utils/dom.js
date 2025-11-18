@@ -25,6 +25,7 @@ export function initElements() {
         voiceModeLanguage: document.getElementById('voiceModeLanguage'),
         textInputWrapper: document.getElementById('textInputWrapper'),
         serverUrl: document.getElementById('serverUrl'),
+        llmProvider: document.getElementById('llmProvider'),
         
         // Buttons
         ttsBtn: document.getElementById('ttsBtn'),
@@ -35,6 +36,7 @@ export function initElements() {
         // Status and Output (legacy status elements removed - using inline status messages now)
         chatStatus: document.getElementById('chatStatus'),
         serverStatus: document.getElementById('serverStatus'),
+        llmStatus: document.getElementById('llmStatus'),
         serverInfo: document.getElementById('serverInfo'),
         
         // Audio and Media

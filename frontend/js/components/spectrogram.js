@@ -11,11 +11,8 @@ export function visualizeAudioSpectrogram(canvas, audioElement) {
         return;
     }
     
-    console.log('[Spectrogram] Setting up visualization for audio element');
-    
     // Clean up any existing visualization
     if (audioElement._spectrogramCleanup) {
-        console.log('[Spectrogram] Cleaning up previous visualization');
         audioElement._spectrogramCleanup();
     }
     
@@ -64,7 +61,6 @@ export function visualizeAudioSpectrogram(canvas, audioElement) {
     let analyser = audioElement._audioAnalyser;
     
     if (!audioContext || audioContext.state === 'closed') {
-        console.log('[Spectrogram] Creating new AudioContext');
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         audioElement._audioContext = audioContext;
         
@@ -74,15 +70,12 @@ export function visualizeAudioSpectrogram(canvas, audioElement) {
             try {
                 source = audioContext.createMediaElementSource(audioElement);
                 audioElement._audioSource = source;
-                console.log('[Spectrogram] Created new MediaElementSource');
             } catch (error) {
                 console.error('[Spectrogram] Error creating media element source:', error);
                 // If source already exists, we need to reuse the existing one
                 // This can happen if the audio element was already connected
                 return;
             }
-        } else {
-            console.log('[Spectrogram] Reusing existing MediaElementSource');
         }
         
         analyser = audioContext.createAnalyser();
@@ -93,9 +86,7 @@ export function visualizeAudioSpectrogram(canvas, audioElement) {
         // Connect the audio graph
         source.connect(analyser);
         analyser.connect(audioContext.destination);
-        console.log('[Spectrogram] Audio graph connected');
     } else {
-        console.log('[Spectrogram] Reusing existing AudioContext');
         // Make sure analyser exists
         if (!analyser) {
             analyser = audioContext.createAnalyser();
@@ -135,10 +126,8 @@ export function visualizeAudioSpectrogram(canvas, audioElement) {
     
     // Handle play event
     const playHandler = () => {
-        console.log('[Spectrogram] Play event triggered');
         // Resume AudioContext if suspended (required by some browsers)
         if (audioContext.state === 'suspended') {
-            console.log('[Spectrogram] Resuming suspended AudioContext');
             audioContext.resume().then(() => {
                 // Start animation loop immediately after resuming
                 if (!animationFrame && !audioElement.paused && !audioElement.ended) {

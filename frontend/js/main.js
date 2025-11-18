@@ -8,6 +8,7 @@ import { updateServerStatus } from './utils/dom.js';
 import { setupCustomAudioPlayer, downloadAudio } from './components/audioPlayer.js';
 import { scrollChatToBottom } from './components/chat.js';
 import { getVoices, getVoiceDetails, checkServerHealth } from './services/api.js';
+import { CONFIG } from './config.js';
 // Lazy load tab modules for better performance
 const tabModules = {
     'tts': () => import('./tabs/tts.js'),
@@ -43,22 +44,13 @@ async function init() {
         
         function updateLoadingStatus(text) {
             if (loadingStatus) loadingStatus.textContent = text;
-            console.log('[Main]', text);
         }
         
         updateLoadingStatus('Starting initialization...');
-        console.log('[Main] TTS Project Frontend Initializing...');
-        console.log('[Main] Window location:', {
-            href: window.location.href,
-            hostname: window.location.hostname,
-            port: window.location.port,
-            protocol: window.location.protocol
-        });
         
         updateLoadingStatus('Initializing DOM elements...');
         // Initialize DOM elements
         elements = initElements();
-        console.log('[Main] DOM elements initialized:', Object.keys(elements).length, 'elements');
         
         updateLoadingStatus('Setting up tabs...');
         // Set up tabs (this will load tab HTML files)
@@ -67,6 +59,9 @@ async function init() {
             // Use requestAnimationFrame to ensure DOM is ready
             await new Promise(resolve => requestAnimationFrame(resolve));
             elements = initElements();
+            
+            // Show/hide LLM provider selector based on active tab
+            updateLlmProviderVisibility(tabName);
             
             // Cleanup server tab when switching away from it
             const previousTab = document.querySelector('.tab-content.active[data-tab]');
@@ -146,8 +141,7 @@ async function init() {
         // Load voices dynamically (must be before tab initialization for voiceDetails)
         await loadVoices();
         
-        // Initialize initial tab (tts) after tabs are loaded
-        // Re-initialize elements after tab content is loaded
+        // Re-initialize elements after voices are loaded
         elements = initElements();
         
         // Populate voiceModeLanguage for chat tab if available
@@ -156,26 +150,62 @@ async function init() {
         // Set up custom audio player
         setupCustomAudioPlayer(elements);
         
-        // Initialize initial tab modules (tts is loaded by default)
-        const ttsState = {
-            setCurrentAudioBlob,
-            voiceDetails
-        };
-        const ttsTab = initTtsTab(elements, ttsState);
-        // Populate voice dropdown if voiceDetails are available
-        if (ttsTab && ttsTab.populateVoiceDropdown && voiceDetails && voiceDetails.length > 0) {
-            ttsTab.populateVoiceDropdown();
+        // Initialize initial tab (tts) if not already initialized by the callback
+        // The callback in setupTabs should have initialized it, but voices weren't loaded yet
+        // So we need to re-initialize it now that voices are available
+        if (!initializedTabs.has('tts')) {
+            try {
+                const ttsModule = await tabModules['tts']();
+                const ttsState = {
+                    setCurrentAudioBlob,
+                    voiceDetails
+                };
+                const ttsTab = ttsModule.initTtsTab(elements, ttsState);
+                // Populate voice dropdown if voiceDetails are available
+                if (ttsTab && ttsTab.populateVoiceDropdown && voiceDetails && voiceDetails.length > 0) {
+                    ttsTab.populateVoiceDropdown();
+                }
+                initializedTabs.add('tts');
+            } catch (error) {
+                console.error('[Main] Failed to load initial TTS tab:', error);
+                showToast('error', `Failed to load TTS tab: ${error.message}`);
+            }
+        } else {
+            // Tab was already initialized, but voices weren't loaded yet
+            // Re-initialize to populate voice dropdown
+            try {
+                const ttsModule = await tabModules['tts']();
+                const ttsState = {
+                    setCurrentAudioBlob,
+                    voiceDetails
+                };
+                // Re-initialize to get updated tab instance with voice details
+                const ttsTab = ttsModule.initTtsTab(elements, ttsState);
+                if (ttsTab && ttsTab.populateVoiceDropdown && voiceDetails && voiceDetails.length > 0) {
+                    ttsTab.populateVoiceDropdown();
+                }
+            } catch (error) {
+                console.error('[Main] Failed to re-initialize TTS tab with voices:', error);
+            }
         }
         
         updateLoadingStatus('Setting up handlers...');
         // Set up download button handlers
         setupDownloadHandlers();
         
+        // Set up LLM provider selector
+        setupLlmProviderSelector();
+        
+        // Make updateLlmProviderVisibility globally available for tab switching
+        window.updateLlmProviderVisibility = updateLlmProviderVisibility;
+        
+        // Set initial visibility based on default tab (tts)
+        updateLlmProviderVisibility('tts');
+        
         // Hide loading indicator and show app
         if (loadingIndicator) loadingIndicator.style.display = 'none';
         if (appContainer) appContainer.style.display = 'flex';
         
-        console.log('[Main] Frontend initialized successfully');
         updateLoadingStatus('Ready!');
     } catch (error) {
         console.error('[Main] Initialization error:', error);
@@ -234,7 +264,65 @@ async function loadVoices() {
     }
 }
 
+// Show/hide LLM provider selector and status based on active tab
+function updateLlmProviderVisibility(tabName) {
+    const llmProviderSelector = document.querySelector('.llm-provider-selector');
+    const llmStatus = document.getElementById('llmStatus');
+    
+    // Show only for AI-related tabs
+    const aiTabs = ['chat', 'voice-chat'];
+    if (aiTabs.includes(tabName)) {
+        if (llmProviderSelector) {
+            llmProviderSelector.style.display = 'flex';
+        }
+        if (llmStatus) {
+            llmStatus.style.display = 'inline-flex';
+            // Check LLM status when showing
+            checkLlmStatus();
+        }
+    } else {
+        if (llmProviderSelector) {
+            llmProviderSelector.style.display = 'none';
+        }
+        if (llmStatus) {
+            llmStatus.style.display = 'none';
+        }
+    }
+}
+
 // Set up download button handlers
+function setupLlmProviderSelector() {
+    if (!elements.llmProvider) return;
+    
+    // Load saved preference or default to ollama (Local)
+    const savedProvider = localStorage.getItem('llmProvider') || 'ollama';
+    if (elements.llmProvider) {
+        elements.llmProvider.value = savedProvider;
+    }
+    
+    // Ensure default is set to ollama if not already set
+    if (!localStorage.getItem('llmProvider')) {
+        localStorage.setItem('llmProvider', 'ollama');
+    }
+    
+    // Initially hide the selector (will be shown when AI tabs are active)
+    const llmProviderSelector = document.querySelector('.llm-provider-selector');
+    if (llmProviderSelector) {
+        llmProviderSelector.style.display = 'none';
+    }
+    
+    elements.llmProvider.addEventListener('change', (e) => {
+        const provider = e.target.value;
+        const providerName = provider === 'ollama' ? 'Local (Ollama)' : 'OpenAI';
+        localStorage.setItem('llmProvider', provider);
+        showToast('info', `LLM provider set to ${providerName}. Restart the server with LLM_PROVIDER=${provider} for changes to take effect.`);
+        // Recheck LLM status when provider changes
+        if (elements.llmStatus && elements.llmStatus.style.display !== 'none') {
+            checkLlmStatus();
+        }
+    });
+}
+
 function setupDownloadHandlers() {
     // TTS download button
     if (elements.ttsDownloadBtn) {
@@ -256,10 +344,8 @@ function setupDownloadHandlers() {
 
 // Server Status Functions (called from main init)
 async function checkServerStatus() {
-    console.log('[Main] Checking server status...');
     try {
         const healthResponse = await checkServerHealth();
-        console.log('[Main] Server health check passed:', healthResponse);
         if (elements.serverStatus) {
             updateServerStatus(elements.serverStatus, 'connected', 'Server Connected');
         }
@@ -281,6 +367,81 @@ async function checkServerStatus() {
             showToast('error', `Server connection failed: ${error.message}`);
         } else {
             console.error('Server connection failed:', error.message);
+        }
+    }
+}
+
+// Check LLM provider status with retry logic
+async function checkLlmStatus(retries = 2) {
+    const llmStatus = elements.llmStatus;
+    if (!llmStatus) return;
+    
+    const provider = elements.llmProvider?.value || localStorage.getItem('llmProvider') || 'ollama';
+    const providerName = provider === 'ollama' ? 'Local' : 'OpenAI';
+    
+    // Update status to checking
+    updateServerStatus(llmStatus, 'disconnected', 'Checking LLM...');
+    
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            // Try a simple chat request to test LLM availability
+            // Use a minimal test message
+            const testMessage = 'test';
+            const timeout = attempt === 0 ? 5000 : 8000; // Longer timeout on retries
+            
+            const response = await fetch(`${CONFIG.API_BASE}/chat`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ message: testMessage }),
+                signal: AbortSignal.timeout(timeout)
+            });
+            
+            if (response.ok) {
+                const data = await response.json().catch(() => ({}));
+                // Check if we got a valid response
+                if (data.reply !== undefined || data.conversation_id !== undefined) {
+                    updateServerStatus(llmStatus, 'connected', `${providerName} Ready`);
+                    return;
+                } else {
+                    throw new Error('Invalid response format');
+                }
+            } else {
+                const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+                const errorMsg = errorData.error || errorData.message || `HTTP ${response.status}`;
+                
+                // Don't retry on client errors (4xx)
+                if (response.status >= 400 && response.status < 500) {
+                    updateServerStatus(llmStatus, 'disconnected', `${providerName} Not Ready`);
+                    return;
+                }
+                
+                // Retry on server errors (5xx) or network errors
+                if (attempt < retries) {
+                    console.warn(`[Main] LLM status check attempt ${attempt + 1} failed:`, errorMsg);
+                    await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1))); // Exponential backoff
+                    continue;
+                }
+                
+                throw new Error(errorMsg);
+            }
+        } catch (error) {
+            // If this is the last attempt, show error
+            if (attempt === retries) {
+                console.warn('[Main] LLM status check failed after retries:', error);
+                if (error.name === 'AbortError' || error.name === 'TimeoutError') {
+                    updateServerStatus(llmStatus, 'disconnected', `${providerName} Timeout`);
+                } else if (error.message?.includes('Failed to fetch') || error.message?.includes('NetworkError') || error.message?.includes('Cannot connect')) {
+                    updateServerStatus(llmStatus, 'disconnected', `${providerName} Connection Error`);
+                } else {
+                    updateServerStatus(llmStatus, 'disconnected', `${providerName} Not Ready`);
+                }
+                return;
+            }
+            
+            // Wait before retry (exponential backoff)
+            await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
         }
     }
 }

@@ -109,7 +109,9 @@ export async function setupTabs(onTabChange = null) {
     const initialContent = tabContentContainer.querySelector(`.tab-content[data-tab="${initialTab}"]`);
     if (initialContent) {
         initialContent.classList.add('active');
-        }
+        // Note: Don't call onTabChange here - it will be called after voices are loaded
+        // This prevents initializing the tab before voices are available
+    }
     
     // Setup tab button click handlers
     tabButtons.forEach(button => {
@@ -149,7 +151,12 @@ export async function setupTabs(onTabChange = null) {
                 
                 // Call tab change callback
                 if (onTabChange) {
-                    onTabChange(targetTab, targetContent);
+                    await onTabChange(targetTab, targetContent);
+                }
+                
+                // Update LLM provider visibility (if function exists)
+                if (typeof window.updateLlmProviderVisibility === 'function') {
+                    window.updateLlmProviderVisibility(targetTab);
                 }
             }
         });

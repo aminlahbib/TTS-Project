@@ -38,6 +38,13 @@ section.tab-content.active[data-tab="voice-chat"] {
     flex-direction: column !important;
     height: 100% !important;
     width: 100% !important;
+    padding: 0 !important; /* Override tab-content padding for full-height layout */
+    margin: 0;
+    position: relative;
+    overflow: hidden;
+    box-sizing: border-box;
+    background: var(--bg);
+    min-height: 0;
 }
 
 .voice-chat-container {
@@ -45,12 +52,14 @@ section.tab-content.active[data-tab="voice-chat"] {
     flex-direction: column;
     height: 100%;
     width: 100%;
-    padding: var(--space-3xl);
+    max-width: var(--content-max-width);
+    margin: 0 auto;
+    padding: var(--space-xl);
     gap: var(--space-xl);
     overflow-y: auto;
     overflow-x: hidden;
     box-sizing: border-box;
-    flex: 1;
+    flex: 1 1 auto;
     min-height: 0;
     position: relative;
     z-index: 1;
@@ -234,6 +243,13 @@ section.tab-content.active[data-tab="voice-chat"] {
     min-height: 1.5rem;
 }
 
+/* Transcript Container - match spectrogram width */
+.voice-transcript-container {
+    width: 100%;
+    max-width: 600px;
+    margin: 0 auto;
+}
+
 /* Responsive */
 @media (max-width: 1024px) {
     .voice-chat-container {
@@ -268,6 +284,10 @@ section.tab-content.active[data-tab="voice-chat"] {
 
     .bot-audio-container {
         height: 120px;
+        max-width: 100%;
+    }
+
+    .voice-transcript-container {
         max-width: 100%;
     }
 }

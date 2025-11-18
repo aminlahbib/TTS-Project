@@ -2,7 +2,6 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 

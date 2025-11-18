@@ -122,11 +122,18 @@ export function initVoiceChatTab(elements, state) {
     const micCtx = micCanvas.getContext('2d');
     const botCtx = botCanvas.getContext('2d');
     
+    // Validate canvas contexts
+    if (!micCtx || !botCtx) {
+        console.error('[VoiceChat] Failed to get canvas contexts');
+        return;
+    }
+    
     function resizeCanvases() {
-        // Mic canvas is square inside container
+        // Mic canvas must be square to maintain circular visualization
         const rect = micCanvas.parentElement.getBoundingClientRect();
-        micCanvas.width = rect.width;
-        micCanvas.height = rect.height;
+        const size = Math.min(rect.width, rect.height);
+        micCanvas.width = size;
+        micCanvas.height = size;
         // Bot canvas fills container
         const botRect = botCanvas.parentElement.getBoundingClientRect();
         botCanvas.width = botRect.width;
@@ -154,6 +161,10 @@ export function initVoiceChatTab(elements, state) {
                         // Restart with new language
                         const sr = createSpeechRecognition();
                         if (sr) {
+                            // Reset transcript when changing language during recording
+                            stateVoice.transcript = '';
+                            updateTranscriptUI('');
+                            
                             sr.lang = ttsLangToSpeechLang(stateVoice.selectedLanguage);
                             sr.onresult = (e) => {
                                 let final = '';
@@ -166,18 +177,29 @@ export function initVoiceChatTab(elements, state) {
                                         interim += transcript;
                                     }
                                 }
-                                stateVoice.transcript = (final + interim).trim();
+                                // Only store final results in stateVoice.transcript
+                                if (final) {
+                                    stateVoice.transcript = (stateVoice.transcript + ' ' + final).trim();
+                                }
+                                // Update UI with final + interim
+                                updateTranscriptUI(interim);
                             };
                             sr.onerror = (e) => {
                                 console.warn('[VoiceChat] SR error:', e.error);
                             };
                             sr.onend = () => {
                                 if (stateVoice.isRecording) {
-                                    sr.start();
+                                    try { sr.start(); } catch (err) {
+                                        console.warn('[VoiceChat] Failed to restart SR:', err);
+                                    }
                                 }
                             };
                             stateVoice.speechRecognition = sr;
-                            sr.start();
+                            try { 
+                                sr.start(); 
+                            } catch (err) {
+                                console.warn('[VoiceChat] Failed to start SR:', err);
+                            }
                         }
                     }
                 }
@@ -240,53 +262,69 @@ export function initVoiceChatTab(elements, state) {
     
     // Draw circular/radial oscillations on mic canvas
     function drawMicOscillations() {
-        if (!stateVoice.isRecording || !stateVoice.analyser || !stateVoice.dataArray) {
-            micCtx.clearRect(0, 0, micCanvas.width, micCanvas.height);
+        if (!stateVoice.isRecording || !stateVoice.analyser || !stateVoice.dataArray || !micCtx || !micCanvas) {
+            if (micCtx && micCanvas) {
+                micCtx.clearRect(0, 0, micCanvas.width, micCanvas.height);
+            }
             return;
         }
-        stateVoice.analyser.getByteFrequencyData(stateVoice.dataArray);
         
-        // Silence detection using audio level
-        const audioLevel = calculateAudioLevel(stateVoice.analyser, stateVoice.dataArray);
-        const now = Date.now();
-        const vadCfg = CONFIG?.VAD || { SILENCE_THRESHOLD: 20, SILENCE_DURATION: 1000, MIN_RECORDING_DURATION: 500 };
-        const threshold = vadCfg.SILENCE_THRESHOLD;
-        const minRecord = vadCfg.MIN_RECORDING_DURATION || 500;
-        const maxSilence = 1000; // 1s as per requirement
-        if (audioLevel > threshold) {
-            stateVoice.hasDetectedSpeech = true;
-            stateVoice.lastVoiceTime = now;
-        } else if (stateVoice.hasDetectedSpeech && stateVoice.lastVoiceTime && (now - stateVoice.lastVoiceTime) >= Math.max(maxSilence, vadCfg.SILENCE_DURATION || 1000)) {
-            // Auto stop after 1s of silence
-            stopRecording();
-        }
-        
-        const { width, height } = micCanvas;
-        const cx = width / 2;
-        const cy = height / 2;
-        const radius = Math.min(width, height) * 0.32;
-        
-        micCtx.clearRect(0, 0, width, height);
-        
-        const bars = 64;
-        for (let i = 0; i < bars; i++) {
-            const t = Math.floor((i / bars) * stateVoice.dataArray.length);
-            const v = stateVoice.dataArray[t] / 255;
-            const angle = (i / bars) * Math.PI * 2;
-            const barLen = radius * 0.6 * v + radius * 0.1;
-            const x1 = cx + Math.cos(angle) * radius;
-            const y1 = cy + Math.sin(angle) * radius;
-            const x2 = cx + Math.cos(angle) * (radius + barLen);
-            const y2 = cy + Math.sin(angle) * (radius + barLen);
+        try {
+            stateVoice.analyser.getByteFrequencyData(stateVoice.dataArray);
             
-            const hue = 240 - v * 180;
-            micCtx.strokeStyle = `hsla(${hue}, 100%, ${30 + v * 50}%, 0.9)`;
-            micCtx.lineWidth = 3;
-            micCtx.lineCap = 'round';
-            micCtx.beginPath();
-            micCtx.moveTo(x1, y1);
-            micCtx.lineTo(x2, y2);
-            micCtx.stroke();
+            // Additional safety check
+            if (!stateVoice.dataArray || stateVoice.dataArray.length === 0) {
+                return;
+            }
+            
+            // Silence detection using audio level
+            const audioLevel = calculateAudioLevel(stateVoice.analyser, stateVoice.dataArray);
+            const now = Date.now();
+            const vadCfg = CONFIG?.VAD || { SILENCE_THRESHOLD: 20, SILENCE_DURATION: 1000, MIN_RECORDING_DURATION: 500 };
+            const threshold = vadCfg.SILENCE_THRESHOLD;
+            const minRecord = vadCfg.MIN_RECORDING_DURATION || 500;
+            const maxSilence = 1000; // 1s as per requirement
+            if (audioLevel > threshold) {
+                stateVoice.hasDetectedSpeech = true;
+                stateVoice.lastVoiceTime = now;
+            } else if (stateVoice.hasDetectedSpeech && stateVoice.lastVoiceTime && (now - stateVoice.lastVoiceTime) >= Math.max(maxSilence, vadCfg.SILENCE_DURATION || 1000)) {
+                // Auto stop after 1s of silence
+                stopRecording();
+            }
+            
+            const { width, height } = micCanvas;
+            const cx = width / 2;
+            const cy = height / 2;
+            const radius = Math.min(width, height) * 0.32;
+            
+            micCtx.clearRect(0, 0, width, height);
+            
+            const bars = 64;
+            const dataLength = stateVoice.dataArray.length;
+            for (let i = 0; i < bars; i++) {
+                const t = Math.floor((i / bars) * dataLength);
+                const v = stateVoice.dataArray[t] / 255;
+                const angle = (i / bars) * Math.PI * 2;
+                const barLen = radius * 0.6 * v + radius * 0.1;
+                const x1 = cx + Math.cos(angle) * radius;
+                const y1 = cy + Math.sin(angle) * radius;
+                const x2 = cx + Math.cos(angle) * (radius + barLen);
+                const y2 = cy + Math.sin(angle) * (radius + barLen);
+                
+                const hue = 240 - v * 180;
+                micCtx.strokeStyle = `hsla(${hue}, 100%, ${30 + v * 50}%, 0.9)`;
+                micCtx.lineWidth = 3;
+                micCtx.lineCap = 'round';
+                micCtx.beginPath();
+                micCtx.moveTo(x1, y1);
+                micCtx.lineTo(x2, y2);
+                micCtx.stroke();
+            }
+        } catch (error) {
+            console.warn('[VoiceChat] Error drawing mic oscillations:', error);
+            if (micCtx && micCanvas) {
+                micCtx.clearRect(0, 0, micCanvas.width, micCanvas.height);
+            }
         }
     }
     
@@ -401,7 +439,11 @@ export function initVoiceChatTab(elements, state) {
                         if (e.results[i].isFinal) final += t + ' ';
                         else interim += t;
                     }
-                    stateVoice.transcript = (final + interim).trim();
+                    // Only store final results in stateVoice.transcript
+                    if (final) {
+                        stateVoice.transcript = (stateVoice.transcript + ' ' + final).trim();
+                    }
+                    // Update UI with final + interim
                     updateTranscriptUI(interim);
                 };
                 sr.onerror = (e) => {
@@ -576,6 +618,11 @@ export function initVoiceChatTab(elements, state) {
             audio.removeEventListener('pause', updateReveal);
             audio.removeEventListener('seeking', updateReveal);
         };
+        // Store cleanup function and handlers for later cleanup
+        stateVoice.wordReveal.updateReveal = updateReveal;
+        stateVoice.wordReveal.endReveal = endReveal;
+        stateVoice.wordReveal.cleanup = cleanup;
+        
         audio.addEventListener('timeupdate', updateReveal);
         audio.addEventListener('pause', updateReveal);
         audio.addEventListener('seeking', updateReveal);
@@ -594,6 +641,12 @@ export function initVoiceChatTab(elements, state) {
             if (stateVoice.wordReveal?.active && stateVoice.wordReveal.targetEl) {
                 stateVoice.wordReveal.targetEl.textContent = stateVoice.wordReveal.fullText || stateVoice.wordReveal.words.join(' ');
                 stateVoice.wordReveal.active = false;
+                // Cleanup word reveal event listeners
+                if (stateVoice.wordReveal.cleanup && stateVoice.botAudio) {
+                    try {
+                        stateVoice.wordReveal.cleanup();
+                    } catch {}
+                }
             }
             if (stateVoice.botAudio._spectrogramCleanup) {
                 try { stateVoice.botAudio._spectrogramCleanup(); } catch {}
@@ -620,13 +673,30 @@ export function initVoiceChatTab(elements, state) {
             window.removeEventListener('resize', resizeCanvases);
             if (stateVoice.isRecording) stopRecording();
             stopMicVisualization();
+            // Cleanup word reveal listeners
+            if (stateVoice.wordReveal?.active && stateVoice.wordReveal.cleanup && stateVoice.botAudio) {
+                try {
+                    stateVoice.wordReveal.cleanup();
+                    stateVoice.wordReveal.active = false;
+                } catch {}
+            }
             if (stateVoice.botAudio) {
-                try { stateVoice.botAudio.pause(); } catch {}
+                try { 
+                    stateVoice.botAudio.pause(); 
+                    if (stateVoice.botAudio._spectrogramCleanup) {
+                        try { stateVoice.botAudio._spectrogramCleanup(); } catch {}
+                    }
+                } catch {}
                 stateVoice.botAudio = null;
             }
             if (stateVoice.botAudioContext) {
                 try { stateVoice.botAudioContext.close(); } catch {}
                 stateVoice.botAudioContext = null;
+            }
+            // Cleanup bot analyser
+            if (stateVoice.botAnalyser) {
+                try { stateVoice.botAnalyser.disconnect(); } catch {}
+                stateVoice.botAnalyser = null;
             }
         }
     };

@@ -15,7 +15,6 @@ png = "0.17"
 base64 = "0.22"
 hound = "3"
 dashmap = "5.5"
-lru = "0.12"
 
 
 # Additional dependencies for streaming audio and mel frames
