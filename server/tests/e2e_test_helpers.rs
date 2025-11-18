@@ -30,7 +30,7 @@ pub async fn create_test_app() -> Router {
     map.insert(
         "de_DE".to_string(),
         (
-            "models/de_DE/de_DE-mls-medium.onnx.json".to_string(),
+            "models/de_DE/thorsten/config.onnx.json".to_string(),
             None,
         ),
     );
