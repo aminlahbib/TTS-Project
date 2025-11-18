@@ -315,10 +315,11 @@ function setupLlmProviderSelector() {
         const provider = e.target.value;
         const providerName = provider === 'ollama' ? 'Local (Ollama)' : 'OpenAI';
         localStorage.setItem('llmProvider', provider);
-        showToast('info', `LLM provider set to ${providerName}. Restart the server with LLM_PROVIDER=${provider} for changes to take effect.`);
-        // Recheck LLM status when provider changes
+        showToast('warning', `LLM provider selector changed to ${providerName}. Note: The backend provider is set at server startup. To actually switch providers, set LLM_PROVIDER=${provider} in .env or docker-compose.yml and restart the server.`, 8000);
+        // Don't automatically check status - the backend provider hasn't changed
+        // User needs to restart server for the change to take effect
         if (elements.llmStatus && elements.llmStatus.style.display !== 'none') {
-            checkLlmStatus();
+            updateServerStatus(elements.llmStatus, 'disconnected', 'Restart server to apply');
         }
     });
 }

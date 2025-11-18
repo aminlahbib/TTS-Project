@@ -34,15 +34,19 @@ services:
     environment:
       - PORT=8085
       - RUST_LOG=info
-      # Use Ollama instead of OpenAI
-      - LLM_PROVIDER=ollama
-      - LLM_MODEL=llama3             # pick the Ollama model you want
+      # LLM Provider: "ollama" (local) or "openai" (cloud)
+      # Change LLM_PROVIDER to switch between providers
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - LLM_MODEL=${LLM_MODEL:-llama3}  # Default: llama3 for Ollama, gpt-3.5-turbo for OpenAI
       - OLLAMA_BASE_URL=http://ollama:11434
       # Qdrant gRPC URL (important: use 6334)
       - QDRANT_URL=http://qdrant:6334
-      # optional tuning
-      - OPENAI_MAX_TOKENS=512        # ignored for Ollama
-      - OPENAI_MAX_RETRIES=0         # ignored for Ollama
+      # OpenAI configuration (only used when LLM_PROVIDER=openai)
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_ORG_ID=${OPENAI_ORG_ID:-}
+      - OPENAI_MAX_TOKENS=${OPENAI_MAX_TOKENS:-512}
+      - OPENAI_MAX_RETRIES=${OPENAI_MAX_RETRIES:-5}
+      - OPENAI_TIMEOUT_SECS=${OPENAI_TIMEOUT_SECS:-60}
     volumes:
       - ./models:/app/models:ro
 
