@@ -35,6 +35,7 @@ pub struct AppState {
     pub request_count: Arc<AtomicU64>,
     pub config: ServerConfig,
     pub metrics: AppMetrics,
+    pub llm_provider: LlmProvider, // Store the provider type for API queries
 }
 
 #[derive(Deserialize)]
@@ -111,14 +112,14 @@ async fn async_main() -> anyhow::Result<()> {
     let llm = if let Ok(url) = std::env::var("QDRANT_URL") {
         if !url.trim().is_empty() {
             info!("Initializing LLM with Qdrant at {}", url);
-            Arc::new(std::sync::Mutex::new(LlmClient::with_storage(provider, &model, None).await?))
+            Arc::new(std::sync::Mutex::new(LlmClient::with_storage(provider.clone(), &model, None).await?))
         } else {
             info!("QDRANT_URL empty, using LLM without storage");
-            Arc::new(std::sync::Mutex::new(LlmClient::new(provider, &model)?))
+            Arc::new(std::sync::Mutex::new(LlmClient::new(provider.clone(), &model)?))
         }
     } else {
         info!("No QDRANT_URL set, using LLM without storage");
-        Arc::new(std::sync::Mutex::new(LlmClient::new(provider, &model)?))
+        Arc::new(std::sync::Mutex::new(LlmClient::new(provider.clone(), &model)?))
     };
 
     info!("Loading TTS models...");
@@ -143,6 +144,7 @@ async fn async_main() -> anyhow::Result<()> {
         request_count: Arc::new(AtomicU64::new(0)),
         config: config.clone(),
         metrics: AppMetrics::new(),
+        llm_provider: provider.clone(), // Store provider type
     };
     info!("Server configuration loaded: port={}, rate_limit={}/min, llm_timeout={}s", 
         config.port, config.rate_limit_per_minute, config.llm_timeout_secs);
@@ -224,6 +226,7 @@ async fn async_main() -> anyhow::Result<()> {
     let public_api = Router::new()
         .route("/health", get(health_check))
         .route("/healthz", get(health_check))
+        .route("/llm/provider", get(llm_provider_endpoint))
         .route("/voices", get(list_voices))
         .route("/voices/detail", get(list_voices_detail))
         .route("/tts", post(tts_endpoint))
@@ -260,6 +263,27 @@ async fn async_main() -> anyhow::Result<()> {
 
 pub async fn health_check() -> &'static str {
     "ok"
+}
+
+#[derive(Serialize)]
+pub struct LlmProviderResponse {
+    pub provider: String,
+    pub model: String,
+}
+
+pub async fn llm_provider_endpoint(State(state): State<AppState>) -> Json<LlmProviderResponse> {
+    let provider_str = match state.llm_provider {
+        LlmProvider::OpenAI => "openai",
+        LlmProvider::Ollama => "ollama",
+    };
+    let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| match state.llm_provider {
+        LlmProvider::OpenAI => "gpt-3.5-turbo".into(),
+        LlmProvider::Ollama => "llama2".into(),
+    });
+    Json(LlmProviderResponse {
+        provider: provider_str.to_string(),
+        model,
+    })
 }
 
 #[derive(Serialize)]

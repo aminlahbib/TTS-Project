@@ -193,8 +193,8 @@ async function init() {
         // Set up download button handlers
         setupDownloadHandlers();
         
-        // Set up LLM provider selector
-        setupLlmProviderSelector();
+        // Set up LLM provider selector (async - will sync with backend)
+        await setupLlmProviderSelector();
         
         // Make updateLlmProviderVisibility globally available for tab switching
         window.updateLlmProviderVisibility = updateLlmProviderVisibility;
@@ -291,16 +291,39 @@ function updateLlmProviderVisibility(tabName) {
 }
 
 // Set up download button handlers
-function setupLlmProviderSelector() {
+async function setupLlmProviderSelector() {
     if (!elements.llmProvider) return;
     
-    // Load saved preference or default to ollama (Local)
-    const savedProvider = localStorage.getItem('llmProvider') || 'ollama';
-    if (elements.llmProvider) {
-        elements.llmProvider.value = savedProvider;
+    // Query the backend to get the actual provider being used
+    try {
+        const response = await fetch(`${CONFIG.API_BASE}/llm/provider`);
+        if (response.ok) {
+            const data = await response.json();
+            const actualProvider = data.provider || 'ollama';
+            // Sync the selector with the actual backend provider
+            if (elements.llmProvider) {
+                elements.llmProvider.value = actualProvider;
+            }
+            // Update localStorage to match backend
+            localStorage.setItem('llmProvider', actualProvider);
+            console.log(`[Main] Backend LLM provider: ${actualProvider}, model: ${data.model || 'unknown'}`);
+        } else {
+            // Fallback to saved preference if API fails
+            const savedProvider = localStorage.getItem('llmProvider') || 'ollama';
+            if (elements.llmProvider) {
+                elements.llmProvider.value = savedProvider;
+            }
+        }
+    } catch (error) {
+        console.warn('[Main] Failed to fetch backend LLM provider, using saved preference:', error);
+        // Fallback to saved preference
+        const savedProvider = localStorage.getItem('llmProvider') || 'ollama';
+        if (elements.llmProvider) {
+            elements.llmProvider.value = savedProvider;
+        }
     }
     
-    // Ensure default is set to ollama if not already set
+    // Ensure default is set if not already set
     if (!localStorage.getItem('llmProvider')) {
         localStorage.setItem('llmProvider', 'ollama');
     }
@@ -377,7 +400,28 @@ async function checkLlmStatus(retries = 2) {
     const llmStatus = elements.llmStatus;
     if (!llmStatus) return;
     
-    const provider = elements.llmProvider?.value || localStorage.getItem('llmProvider') || 'ollama';
+    // Get the actual backend provider, not just the frontend selector
+    let provider = 'ollama';
+    try {
+        const response = await fetch(`${CONFIG.API_BASE}/llm/provider`);
+        if (response.ok) {
+            const data = await response.json();
+            provider = data.provider || 'ollama';
+            // Sync the selector with actual backend provider
+            if (elements.llmProvider && elements.llmProvider.value !== provider) {
+                elements.llmProvider.value = provider;
+                localStorage.setItem('llmProvider', provider);
+            }
+        } else {
+            // Fallback to selector value if API fails
+            provider = elements.llmProvider?.value || localStorage.getItem('llmProvider') || 'ollama';
+        }
+    } catch (error) {
+        console.warn('[Main] Failed to fetch backend provider, using selector value:', error);
+        // Fallback to selector value
+        provider = elements.llmProvider?.value || localStorage.getItem('llmProvider') || 'ollama';
+    }
+    
     const providerName = provider === 'ollama' ? 'Local' : 'OpenAI';
     
     // Update status to checking
