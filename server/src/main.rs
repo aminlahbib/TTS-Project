@@ -26,6 +26,7 @@ use futures_util::SinkExt;
 use crate::error::ApiError;
 use crate::validation::{validate_chat_request, validate_conversation_id, validate_tts_request};
 use crate::config::ServerConfig;
+use crate::metrics::{AppMetrics, EndpointMetrics, TtsMetrics, LlmMetrics};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -33,6 +34,7 @@ pub struct AppState {
     pub llm: Arc<std::sync::Mutex<LlmClient>>,
     pub request_count: Arc<AtomicU64>,
     pub config: ServerConfig,
+    pub metrics: AppMetrics,
 }
 
 #[derive(Deserialize)]
@@ -140,6 +142,7 @@ async fn async_main() -> anyhow::Result<()> {
         llm,
         request_count: Arc::new(AtomicU64::new(0)),
         config: config.clone(),
+        metrics: AppMetrics::new(),
     };
     info!("Server configuration loaded: port={}, rate_limit={}/min, llm_timeout={}s", 
         config.port, config.rate_limit_per_minute, config.llm_timeout_secs);
@@ -228,9 +231,10 @@ async fn async_main() -> anyhow::Result<()> {
         .route("/voice-chat", post(voice_chat_endpoint))
         .route("/ws/chat/stream", get(chat_stream_ws));
     
-    // Metrics endpoint - consider adding authentication in production
+    // Metrics endpoints - consider adding authentication in production
     let metrics_api = Router::new()
-        .route("/metrics", get(metrics_endpoint));
+        .route("/metrics", get(metrics_endpoint))
+        .route("/metrics/detailed", get(detailed_metrics_endpoint));
     
     let api = Router::new()
         .merge(public_api)
@@ -323,6 +327,105 @@ pub async fn metrics_endpoint(State(state): State<AppState>) -> Json<MetricsResp
     })
 }
 
+/// Enhanced metrics endpoint with detailed per-endpoint and component metrics
+pub async fn detailed_metrics_endpoint(State(state): State<AppState>) -> Json<crate::metrics::DetailedMetricsResponse> {
+    use crate::metrics::{DetailedMetricsResponse, SystemMetrics, EndpointMetricsResponse, EndpointStats, TtsMetricsResponse, LlmMetricsResponse};
+    use chrono::Utc;
+    
+    let mut system = sysinfo::System::new();
+    system.refresh_cpu();
+    system.refresh_memory();
+    
+    let cpu_usage = system.global_cpu_info().cpu_usage();
+    let memory_used = system.used_memory();
+    let memory_total = system.total_memory();
+    let memory_usage_percent = if memory_total > 0 {
+        (memory_used as f64 / memory_total as f64 * 100.0) as f32
+    } else {
+        0.0
+    };
+    
+    let uptime = START_TIME.get()
+        .map(|start| start.elapsed().as_secs())
+        .unwrap_or(0);
+    
+    let system_load = {
+        #[cfg(unix)]
+        {
+            use std::fs;
+            if let Ok(loadavg) = fs::read_to_string("/proc/loadavg") {
+                loadavg.split_whitespace().next()
+                    .and_then(|s| s.parse::<f64>().ok())
+            } else {
+                None
+            }
+        }
+        #[cfg(not(unix))]
+        None
+    };
+    
+    Json(DetailedMetricsResponse {
+        timestamp: Utc::now(),
+        system: SystemMetrics {
+            cpu_usage_percent: cpu_usage,
+            memory_used_mb: memory_used / 1024 / 1024,
+            memory_total_mb: memory_total / 1024 / 1024,
+            memory_usage_percent,
+            request_count: state.request_count.load(Ordering::Relaxed),
+            uptime_seconds: uptime,
+            system_load,
+        },
+        endpoints: EndpointMetricsResponse {
+            tts: EndpointStats {
+                request_count: state.metrics.tts.request_count.load(Ordering::Relaxed),
+                error_count: state.metrics.tts.error_count.load(Ordering::Relaxed),
+                avg_latency_ms: state.metrics.tts.avg_latency_ms(),
+                min_latency_ms: state.metrics.tts.min_latency_ms.load(Ordering::Relaxed),
+                max_latency_ms: state.metrics.tts.max_latency_ms.load(Ordering::Relaxed),
+                p50_latency_ms: state.metrics.tts.p50_latency_ms(),
+                p95_latency_ms: state.metrics.tts.p95_latency_ms(),
+                p99_latency_ms: state.metrics.tts.p99_latency_ms(),
+            },
+            chat: EndpointStats {
+                request_count: state.metrics.chat.request_count.load(Ordering::Relaxed),
+                error_count: state.metrics.chat.error_count.load(Ordering::Relaxed),
+                avg_latency_ms: state.metrics.chat.avg_latency_ms(),
+                min_latency_ms: state.metrics.chat.min_latency_ms.load(Ordering::Relaxed),
+                max_latency_ms: state.metrics.chat.max_latency_ms.load(Ordering::Relaxed),
+                p50_latency_ms: state.metrics.chat.p50_latency_ms(),
+                p95_latency_ms: state.metrics.chat.p95_latency_ms(),
+                p99_latency_ms: state.metrics.chat.p99_latency_ms(),
+            },
+            voice_chat: EndpointStats {
+                request_count: state.metrics.voice_chat.request_count.load(Ordering::Relaxed),
+                error_count: state.metrics.voice_chat.error_count.load(Ordering::Relaxed),
+                avg_latency_ms: state.metrics.voice_chat.avg_latency_ms(),
+                min_latency_ms: state.metrics.voice_chat.min_latency_ms.load(Ordering::Relaxed),
+                max_latency_ms: state.metrics.voice_chat.max_latency_ms.load(Ordering::Relaxed),
+                p50_latency_ms: state.metrics.voice_chat.p50_latency_ms(),
+                p95_latency_ms: state.metrics.voice_chat.p95_latency_ms(),
+                p99_latency_ms: state.metrics.voice_chat.p99_latency_ms(),
+            },
+        },
+        tts: TtsMetricsResponse {
+            synthesis_count: state.metrics.tts_specific.synthesis_count.load(Ordering::Relaxed),
+            avg_synthesis_time_ms: state.metrics.tts_specific.avg_synthesis_time_ms(),
+            cache_hits: state.metrics.tts_specific.cache_hits.load(Ordering::Relaxed),
+            cache_misses: state.metrics.tts_specific.cache_misses.load(Ordering::Relaxed),
+            cache_hit_rate: state.metrics.tts_specific.cache_hit_rate(),
+            total_samples: state.metrics.tts_specific.total_samples.load(Ordering::Relaxed),
+        },
+        llm: LlmMetricsResponse {
+            request_count: state.metrics.llm_specific.request_count.load(Ordering::Relaxed),
+            total_tokens: state.metrics.llm_specific.total_tokens.load(Ordering::Relaxed),
+            avg_tokens_per_request: state.metrics.llm_specific.avg_tokens_per_request(),
+            avg_response_time_ms: state.metrics.llm_specific.avg_response_time_ms(),
+            error_count: state.metrics.llm_specific.error_count.load(Ordering::Relaxed),
+            timeout_count: state.metrics.llm_specific.timeout_count.load(Ordering::Relaxed),
+        },
+    })
+}
+
 pub async fn list_voices(State(state): State<AppState>) -> Json<Vec<String>> {
     Json(state.tts.list_languages())
 }
@@ -368,19 +471,57 @@ pub async fn tts_endpoint(
     Json(req): Json<TtsRequest>,
 ) -> Result<Json<TtsResponse>, ApiError> {
     state.request_count.fetch_add(1, Ordering::Relaxed);
+    let start_time = std::time::Instant::now();
     validate_tts_request(&req.text, req.language.as_deref())?;
 
-    let (samples, sample_rate) = state
-        .tts
-        .synthesize_with_sample_rate(&req.text, req.language.as_deref(), req.speaker, req.voice.as_deref())
-        .map_err(ApiError::TtsError)?;
+    // Use spawn_blocking to avoid blocking async runtime
+    let tts = state.tts.clone();
+    let text = req.text.clone();
+    let language = req.language.clone();
+    let speaker = req.speaker;
+    let voice = req.voice.clone();
+    
+    let tts_start = std::time::Instant::now();
+    let (samples, sample_rate) = tokio::task::spawn_blocking(move || {
+        tts.synthesize_with_sample_rate(&text, language.as_deref(), speaker, voice.as_deref())
+    })
+    .await
+    .map_err(|e| {
+        state.metrics.tts.record_error();
+        ApiError::InternalError(format!("Task join error: {e}"))
+    })?
+    .map_err(|e| {
+        state.metrics.tts.record_error();
+        ApiError::TtsError(e)
+    })?;
 
+    let tts_time_ms = tts_start.elapsed().as_millis() as u64;
     let sample_rate_f32 = sample_rate as f32;
 
-    let audio_base64 = tts_core::TtsManager::encode_wav_base64(&samples, sample_rate)
-        .map_err(|e| ApiError::TtsError(anyhow::anyhow!("WAV encoding error: {e}")))?;
+    // Encode WAV in blocking task as well
+    let samples_clone = samples.clone();
+    let audio_base64 = tokio::task::spawn_blocking(move || {
+        tts_core::TtsManager::encode_wav_base64(&samples_clone, sample_rate)
+    })
+    .await
+    .map_err(|e| {
+        state.metrics.tts.record_error();
+        ApiError::InternalError(format!("Task join error: {e}"))
+    })?
+    .map_err(|e| {
+        state.metrics.tts.record_error();
+        ApiError::TtsError(anyhow::anyhow!("WAV encoding error: {e}"))
+    })?;
 
     let duration_ms = (samples.len() as f32 / sample_rate_f32 * 1000.0) as u64;
+    let latency_ms = start_time.elapsed().as_millis() as u64;
+    
+    // Record metrics
+    state.metrics.tts.record_request(latency_ms);
+    state.metrics.tts_specific.record_synthesis(tts_time_ms, samples.len(), false); // TODO: track cache hits
+    
+    info!("TTS request completed in {}ms, duration: {}ms, samples: {}", 
+          latency_ms, duration_ms, samples.len());
 
     Ok(Json(TtsResponse {
         audio_base64,
@@ -434,15 +575,21 @@ pub async fn chat_endpoint(
     let (reply, conv_id) = match result {
         Ok(Ok(Ok((reply, conv_id)))) => (reply, conv_id),
         Ok(Ok(Err(join_err))) => {
+            state.metrics.chat.record_error();
+            state.metrics.llm_specific.record_error();
             error!("Join error in chat task: {join_err}");
             return Err(ApiError::InternalError(format!("Join error: {join_err}")));
         }
         Ok(Err(join_err)) => {
+            state.metrics.chat.record_error();
+            state.metrics.llm_specific.record_error();
             error!("Task join error: {join_err}");
             return Err(ApiError::InternalError(format!("Task join error: {join_err}")));
         }
         Err(_) => {
             let timeout_secs = state.config.llm_timeout().as_secs();
+            state.metrics.chat.record_error();
+            state.metrics.llm_specific.record_timeout();
             error!("LLM request timed out after {} seconds", timeout_secs);
             return Err(ApiError::LlmError(format!(
                 "Request timed out after {} seconds. Please try again with a shorter message.",
@@ -451,8 +598,13 @@ pub async fn chat_endpoint(
         }
     };
 
-    let llm_time = start_time.elapsed();
-    info!("LLM response received in {:.2}s, reply length={}", llm_time.as_secs_f64(), reply.len());
+    let total_latency_ms = start_time.elapsed().as_millis() as u64;
+    
+    // Record metrics
+    state.metrics.chat.record_request(total_latency_ms);
+    state.metrics.llm_specific.record_request(total_latency_ms, reply.len());
+    
+    info!("LLM response received in {:.2}s, reply length={}", total_latency_ms as f64 / 1000.0, reply.len());
 
     // Return text immediately - TTS generation moved to background for speed
     // This ensures response time is only limited by LLM, not TTS
@@ -504,6 +656,7 @@ pub async fn voice_chat_endpoint(
     Json(req): Json<VoiceChatRequest>,
 ) -> Result<Json<VoiceChatResponse>, ApiError> {
     state.request_count.fetch_add(1, Ordering::Relaxed);
+    let start_time = std::time::Instant::now();
     validate_chat_request(&req.message)?;
     if let Some(ref id) = req.conversation_id {
         validate_conversation_id(id)?;
@@ -546,15 +699,21 @@ pub async fn voice_chat_endpoint(
     let (reply, conv_id) = match result {
         Ok(Ok(Ok((reply, conv_id)))) => (reply, conv_id),
         Ok(Ok(Err(join_err))) => {
+            state.metrics.voice_chat.record_error();
+            state.metrics.llm_specific.record_error();
             error!("Join error in voice chat task: {join_err}");
             return Err(ApiError::InternalError(format!("Join error: {join_err}")));
         }
         Ok(Err(join_err)) => {
+            state.metrics.voice_chat.record_error();
+            state.metrics.llm_specific.record_error();
             error!("Task join error: {join_err}");
             return Err(ApiError::InternalError(format!("Task join error: {join_err}")));
         }
         Err(_) => {
             let timeout_secs = state.config.llm_timeout().as_secs();
+            state.metrics.voice_chat.record_error();
+            state.metrics.llm_specific.record_timeout();
             error!("LLM request timed out after {} seconds", timeout_secs);
             return Err(ApiError::LlmError(format!(
                 "Request timed out after {} seconds. Please try again with a shorter message.",
@@ -566,18 +725,57 @@ pub async fn voice_chat_endpoint(
     // Clean text for natural TTS speech
     let cleaned_reply = clean_text_for_tts(&reply);
     
-    // Generate TTS audio (required for voice chat)
+    // Generate TTS audio (required for voice chat) - use spawn_blocking
     let voice_id = req.voice.as_deref();
-    let (samples, sample_rate) = state
-        .tts
-        .synthesize_with_sample_rate(&cleaned_reply, Some(&language), None, voice_id)
-        .map_err(ApiError::TtsError)?;
+    let tts = state.tts.clone();
+    let cleaned_reply_clone = cleaned_reply.clone();
+    let language_clone = language.clone();
+    let voice_id_clone = voice_id.map(|s| s.to_string());
+    
+    let tts_start = std::time::Instant::now();
+    let (samples, sample_rate) = tokio::task::spawn_blocking(move || {
+        tts.synthesize_with_sample_rate(
+            &cleaned_reply_clone, 
+            Some(&language_clone), 
+            None, 
+            voice_id_clone.as_deref()
+        )
+    })
+    .await
+    .map_err(|e| {
+        state.metrics.voice_chat.record_error();
+        ApiError::InternalError(format!("Task join error: {e}"))
+    })?
+    .map_err(|e| {
+        state.metrics.voice_chat.record_error();
+        ApiError::TtsError(e)
+    })?;
 
+    let tts_time_ms = tts_start.elapsed().as_millis() as u64;
     let sample_rate_f32 = sample_rate as f32;
     let duration_ms = (samples.len() as f32 / sample_rate_f32 * 1000.0) as u64;
 
-    let audio_base64 = tts_core::TtsManager::encode_wav_base64(&samples, sample_rate)
-        .map_err(|e| ApiError::TtsError(anyhow::anyhow!("WAV encoding error: {e}")))?;
+    // Encode WAV in blocking task
+    let samples_clone = samples.clone();
+    let audio_base64 = tokio::task::spawn_blocking(move || {
+        tts_core::TtsManager::encode_wav_base64(&samples_clone, sample_rate)
+    })
+    .await
+    .map_err(|e| {
+        state.metrics.voice_chat.record_error();
+        ApiError::InternalError(format!("Task join error: {e}"))
+    })?
+    .map_err(|e| {
+        state.metrics.voice_chat.record_error();
+        ApiError::TtsError(anyhow::anyhow!("WAV encoding error: {e}"))
+    })?;
+
+    let total_latency_ms = start_time.elapsed().as_millis() as u64;
+    
+    // Record metrics
+    state.metrics.voice_chat.record_request(total_latency_ms);
+    state.metrics.llm_specific.record_request(total_latency_ms, reply.len());
+    state.metrics.tts_specific.record_synthesis(tts_time_ms, samples.len(), false); // TODO: track cache hits
 
     Ok(Json(VoiceChatResponse {
         audio_base64,

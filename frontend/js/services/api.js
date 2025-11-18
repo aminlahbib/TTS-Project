@@ -10,6 +10,46 @@ if (!CONFIG) {
 
 const { REQUEST } = CONFIG;
 
+// Request deduplication cache
+const pendingRequests = new Map();
+
+// Response cache with TTL
+const responseCache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+function getCacheKey(url, options = {}) {
+    const method = options.method || 'GET';
+    const body = options.body || '';
+    return `${method}:${url}:${body}`;
+}
+
+function isCacheable(method, url) {
+    // Only cache GET requests for static data
+    if (method !== 'GET') return false;
+    // Cache voices endpoints
+    return url.includes('/voices') || url.includes('/health');
+}
+
+function getCachedResponse(cacheKey) {
+    const cached = responseCache.get(cacheKey);
+    if (!cached) return null;
+    
+    const now = Date.now();
+    if (now - cached.timestamp > CACHE_TTL) {
+        responseCache.delete(cacheKey);
+        return null;
+    }
+    
+    return cached.response;
+}
+
+function setCachedResponse(cacheKey, response) {
+    responseCache.set(cacheKey, {
+        response: response.clone(),
+        timestamp: Date.now()
+    });
+}
+
 // Get API_BASE lazily (will be computed when first accessed)
 function getApiBase() {
     try {
@@ -40,46 +80,80 @@ function logApiConfig() {
 
 
 async function fetchWithErrorHandling(url, options = {}) {
-    try {
-        console.log('[API] Fetching:', { url, method: options.method || 'GET' });
-        const response = await fetch(url, options);
-        
-        console.log('[API] Response received:', {
-            url,
-            status: response.status,
-            statusText: response.statusText,
-            ok: response.ok,
-            headers: Object.fromEntries(response.headers.entries())
-        });
-        
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => {
-                // Try to get text if JSON fails
-                return response.text().then(text => ({ error: text || `HTTP ${response.status}` }));
-            });
-            const errorMsg = errorData.error || `HTTP ${response.status}: ${response.statusText}`;
-            console.error('[API] Request failed:', { url, status: response.status, error: errorMsg });
-            throw new Error(errorMsg);
+    const method = options.method || 'GET';
+    const cacheKey = getCacheKey(url, options);
+    
+    // Check cache for GET requests
+    if (isCacheable(method, url)) {
+        const cached = getCachedResponse(cacheKey);
+        if (cached) {
+            console.log('[API] Cache hit:', url);
+            return cached;
         }
-        
-        return response;
-    } catch (error) {
-        console.error('[API] Fetch error:', {
-            url,
-            name: error.name,
-            message: error.message,
-            stack: error.stack
-        });
-        
-        // Handle specific error types
-        if (error.name === 'AbortError' || error.name === 'TimeoutError') {
-            throw new Error('Request timed out. Please try again.');
-        } else if (error.name === 'TypeError' && error.message.includes('fetch')) {
-            const apiBase = getApiBase();
-            throw new Error(`Cannot connect to server at ${apiBase}. Is the server running? Check browser console for CORS errors.`);
-        }
-        throw error;
     }
+    
+    // Check for duplicate pending requests
+    if (pendingRequests.has(cacheKey)) {
+        console.log('[API] Deduplicating request:', url);
+        return pendingRequests.get(cacheKey);
+    }
+    
+    // Create request promise
+    const requestPromise = (async () => {
+        try {
+            console.log('[API] Fetching:', { url, method });
+            const response = await fetch(url, options);
+            
+            console.log('[API] Response received:', {
+                url,
+                status: response.status,
+                statusText: response.statusText,
+                ok: response.ok,
+                headers: Object.fromEntries(response.headers.entries())
+            });
+            
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => {
+                    // Try to get text if JSON fails
+                    return response.text().then(text => ({ error: text || `HTTP ${response.status}` }));
+                });
+                const errorMsg = errorData.error || `HTTP ${response.status}: ${response.statusText}`;
+                console.error('[API] Request failed:', { url, status: response.status, error: errorMsg });
+                throw new Error(errorMsg);
+            }
+            
+            // Cache successful GET responses
+            if (isCacheable(method, url)) {
+                setCachedResponse(cacheKey, response);
+            }
+            
+            return response;
+        } catch (error) {
+            console.error('[API] Fetch error:', {
+                url,
+                name: error.name,
+                message: error.message,
+                stack: error.stack
+            });
+            
+            // Handle specific error types
+            if (error.name === 'AbortError' || error.name === 'TimeoutError') {
+                throw new Error('Request timed out. Please try again.');
+            } else if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                const apiBase = getApiBase();
+                throw new Error(`Cannot connect to server at ${apiBase}. Is the server running? Check browser console for CORS errors.`);
+            }
+            throw error;
+        } finally {
+            // Remove from pending requests
+            pendingRequests.delete(cacheKey);
+        }
+    })();
+    
+    // Store pending request
+    pendingRequests.set(cacheKey, requestPromise);
+    
+    return requestPromise;
 }
 
 

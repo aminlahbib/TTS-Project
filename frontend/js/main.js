@@ -8,10 +8,13 @@ import { updateServerStatus } from './utils/dom.js';
 import { setupCustomAudioPlayer, downloadAudio } from './components/audioPlayer.js';
 import { scrollChatToBottom } from './components/chat.js';
 import { getVoices, getVoiceDetails, checkServerHealth } from './services/api.js';
-import { initTtsTab } from './tabs/tts.js';
-import { initChatTab } from './tabs/chat.js';
-import { initServerTab } from './tabs/server.js';
-import { initVoiceChatTab } from './tabs/voice-chat.js';
+// Lazy load tab modules for better performance
+const tabModules = {
+    'tts': () => import('./tabs/tts.js'),
+    'chat': () => import('./tabs/chat.js'),
+    'server': () => import('./tabs/server.js'),
+    'voice-chat': () => import('./tabs/voice-chat.js'),
+};
 
 // Global state
 let elements = {};
@@ -81,59 +84,57 @@ async function init() {
                 return;
             }
             
-            if (tabName === 'chat') {
-                // Initialize chat tab
-                const chatState = {
-                    get currentConversationId() { return currentConversationId; },
-                    set currentConversationId(value) { currentConversationId = value; },
-                    setCurrentConversationId
-                };
-                initChatTab(elements, chatState);
-                // Populate voiceModeLanguage for dictating mode
-                populateVoiceModeLanguage();
-                initializedTabs.add(tabName);
-                setTimeout(() => {
-                    scrollChatToBottom(elements.chatMessages);
-                }, 100);
-            }
-            if (tabName === 'voice-chat') {
-                // Initialize voice chat tab
-                const voiceState = {
-                    get currentConversationId() { return currentConversationId; },
-                    set currentConversationId(value) { currentConversationId = value; },
-                    setCurrentConversationId,
-                    voiceDetails
-                };
-                const voiceChatTab = initVoiceChatTab(elements, voiceState);
-                // Populate voice dropdown for voice-chat tab
-                if (voiceChatTab && voiceChatTab.populateVoiceDropdown && voiceDetails && voiceDetails.length > 0) {
-                    voiceChatTab.populateVoiceDropdown();
+            // Lazy load and initialize tab modules
+            if (tabModules[tabName]) {
+                try {
+                    const module = await tabModules[tabName]();
+                    
+                    if (tabName === 'chat') {
+                        const chatState = {
+                            get currentConversationId() { return currentConversationId; },
+                            set currentConversationId(value) { currentConversationId = value; },
+                            setCurrentConversationId
+                        };
+                        module.initChatTab(elements, chatState);
+                        populateVoiceModeLanguage();
+                        initializedTabs.add(tabName);
+                        setTimeout(() => {
+                            scrollChatToBottom(elements.chatMessages);
+                        }, 100);
+                    } else if (tabName === 'voice-chat') {
+                        const voiceState = {
+                            get currentConversationId() { return currentConversationId; },
+                            set currentConversationId(value) { currentConversationId = value; },
+                            setCurrentConversationId,
+                            voiceDetails
+                        };
+                        const voiceChatTab = module.initVoiceChatTab(elements, voiceState);
+                        if (voiceChatTab && voiceChatTab.populateVoiceDropdown && voiceDetails && voiceDetails.length > 0) {
+                            voiceChatTab.populateVoiceDropdown();
+                        }
+                        initializedTabs.add(tabName);
+                    } else if (tabName === 'server') {
+                        const serverTab = module.initServerTab(elements);
+                        if (serverTab && serverTab.cleanup) {
+                            window.serverTabCleanup = serverTab.cleanup;
+                        }
+                        initializedTabs.add(tabName);
+                    } else if (tabName === 'tts') {
+                        const ttsState = {
+                            setCurrentAudioBlob,
+                            voiceDetails
+                        };
+                        const ttsTab = module.initTtsTab(elements, ttsState);
+                        setupCustomAudioPlayer(elements);
+                        if (ttsTab && ttsTab.populateVoiceDropdown && voiceDetails && voiceDetails.length > 0) {
+                            ttsTab.populateVoiceDropdown();
+                        }
+                        initializedTabs.add(tabName);
+                    }
+                } catch (error) {
+                    console.error(`[Main] Failed to load tab module ${tabName}:`, error);
+                    showToast('error', `Failed to load ${tabName} tab: ${error.message}`);
                 }
-                initializedTabs.add(tabName);
-            }
-            
-            if (tabName === 'server') {
-                // Initialize server tab
-                const serverTab = initServerTab(elements);
-                // Store cleanup function for when tab changes
-                if (serverTab && serverTab.cleanup) {
-                    window.serverTabCleanup = serverTab.cleanup;
-                }
-                initializedTabs.add(tabName);
-            }
-            if (tabName === 'tts') {
-                // Initialize TTS tab
-                const ttsState = {
-                    setCurrentAudioBlob,
-                    voiceDetails
-                };
-                const ttsTab = initTtsTab(elements, ttsState);
-                setupCustomAudioPlayer(elements);
-                // Populate voice dropdown for TTS tab
-                if (ttsTab && ttsTab.populateVoiceDropdown && voiceDetails && voiceDetails.length > 0) {
-                    ttsTab.populateVoiceDropdown();
-                }
-                initializedTabs.add(tabName);
             }
         });
         

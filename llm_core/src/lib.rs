@@ -211,7 +211,8 @@ impl LlmProviderTrait for OpenAiClient {
             let client = reqwest::Client::builder()
                 .timeout(Duration::from_secs(timeout_secs))
                 .tcp_keepalive(Duration::from_secs(60))
-                .pool_max_idle_per_host(10)
+                .pool_max_idle_per_host(50)
+                .pool_idle_timeout(Duration::from_secs(90))
                 .build()
                 .unwrap();
             
@@ -400,7 +401,8 @@ impl LlmProviderTrait for OllamaClient {
             let client = reqwest::Client::builder()
                 .timeout(Duration::from_secs(120))
                 .tcp_keepalive(Duration::from_secs(60))
-                .pool_max_idle_per_host(10)
+                .pool_max_idle_per_host(50)
+                .pool_idle_timeout(Duration::from_secs(90))
                 .build()
                 .unwrap();
             
