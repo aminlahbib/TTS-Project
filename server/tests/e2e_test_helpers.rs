@@ -52,16 +52,17 @@ pub async fn create_test_app() -> Router {
     
     let tts = Arc::new(TtsManager::new(map));
 
-    // Create LLM client (may fail if API key not set, but that's ok for tests)
-    if std::env::var("OPENAI_API_KEY").is_err() {
-        std::env::set_var("OPENAI_API_KEY", "test-key-for-e2e-tests");
+    // Create LLM client using Ollama
+    // Set OLLAMA_BASE_URL if not set (for tests)
+    if std::env::var("OLLAMA_BASE_URL").is_err() {
+        std::env::set_var("OLLAMA_BASE_URL", "http://localhost:11434");
     }
     let llm = Arc::new(std::sync::Mutex::new(
-        LlmClient::new(LlmProvider::OpenAI, "gpt-3.5-turbo")
+        LlmClient::new(LlmProvider::Ollama, "llama3")
             .unwrap_or_else(|_| {
-                // If LLM client creation fails, create a dummy one
+                // If LLM client creation fails, try again
                 // This allows tests to run even without LLM configured
-                LlmClient::new(LlmProvider::OpenAI, "gpt-3.5-turbo")
+                LlmClient::new(LlmProvider::Ollama, "llama3")
                     .unwrap_or_else(|_| panic!("Failed to create LLM client"))
             }),
     ));

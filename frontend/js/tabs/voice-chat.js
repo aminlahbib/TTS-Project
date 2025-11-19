@@ -129,22 +129,43 @@ export function initVoiceChatTab(elements, state) {
     }
     
     function resizeCanvases() {
-        // Mic canvas must be square to maintain circular visualization
-        const rect = micCanvas.parentElement.getBoundingClientRect();
-        const size = Math.min(rect.width, rect.height);
-        micCanvas.width = size;
-        micCanvas.height = size;
-        // Bot canvas fills container
-        const botRect = botCanvas.parentElement.getBoundingClientRect();
-        botCanvas.width = botRect.width;
-        botCanvas.height = botRect.height;
-        if (botSpecCanvas) {
-            botSpecCanvas.width = botRect.width;
-            botSpecCanvas.height = botRect.height;
+        try {
+            // Mic canvas must be square to maintain circular visualization
+            if (micCanvas && micCanvas.parentElement) {
+                const rect = micCanvas.parentElement.getBoundingClientRect();
+                const size = Math.min(rect.width, rect.height);
+                if (size > 0) {
+                    micCanvas.width = size;
+                    micCanvas.height = size;
+                }
+            }
+            // Bot canvas fills container
+            if (botCanvas && botCanvas.parentElement) {
+                const botRect = botCanvas.parentElement.getBoundingClientRect();
+                if (botRect.width > 0 && botRect.height > 0) {
+                    botCanvas.width = botRect.width;
+                    botCanvas.height = botRect.height;
+                }
+            }
+            if (botSpecCanvas && botCanvas && botCanvas.parentElement) {
+                const botRect = botCanvas.parentElement.getBoundingClientRect();
+                if (botRect.width > 0 && botRect.height > 0) {
+                    botSpecCanvas.width = botRect.width;
+                    botSpecCanvas.height = botRect.height;
+                }
+            }
+        } catch (error) {
+            console.warn('[VoiceChat] Error resizing canvases:', error);
         }
     }
-    resizeCanvases();
-    window.addEventListener('resize', resizeCanvases);
+    
+    // Initial resize with delay to ensure DOM is ready
+    requestAnimationFrame(() => {
+        resizeCanvases();
+    });
+    
+    const resizeHandler = resizeCanvases;
+    window.addEventListener('resize', resizeHandler);
     
     // Update selected voice when voice select changes (language is already set)
     if (voiceSelect) {
@@ -329,27 +350,42 @@ export function initVoiceChatTab(elements, state) {
     }
     
     function drawBotOscillations() {
+        if (!botCtx || !botCanvas) return;
+        
         if (!stateVoice.botAnalyser || !stateVoice.botDataArray) {
-            botCtx.clearRect(0, 0, botCanvas.width, botCanvas.height);
+            try {
+                botCtx.clearRect(0, 0, botCanvas.width, botCanvas.height);
+            } catch (e) {
+                console.warn('[VoiceChat] Error clearing bot canvas:', e);
+            }
             return;
         }
-        stateVoice.botAnalyser.getByteFrequencyData(stateVoice.botDataArray);
-        const { width, height } = botCanvas;
-        botCtx.clearRect(0, 0, width, height);
         
-        const bars = Math.min(128, stateVoice.botDataArray.length);
-        const barWidth = width / bars;
-        for (let i = 0; i < bars; i++) {
-            const v = stateVoice.botDataArray[i] / 255;
-            const barHeight = v * height * 0.9;
-            const x = i * barWidth;
-            const y = height - barHeight;
-            const hue = 200 - v * 100;
-            const grad = botCtx.createLinearGradient(x, y, x, height);
-            grad.addColorStop(0, `hsl(${hue}, 100%, ${50 + v * 30}%)`);
-            grad.addColorStop(1, `hsl(${hue}, 100%, ${20 + v * 10}%)`);
-            botCtx.fillStyle = grad;
-            botCtx.fillRect(x + 1, y, barWidth - 2, barHeight);
+        try {
+            stateVoice.botAnalyser.getByteFrequencyData(stateVoice.botDataArray);
+            const { width, height } = botCanvas;
+            if (width === 0 || height === 0) return;
+            
+            botCtx.clearRect(0, 0, width, height);
+            
+            const bars = Math.min(128, stateVoice.botDataArray.length);
+            if (bars === 0) return;
+            
+            const barWidth = width / bars;
+            for (let i = 0; i < bars; i++) {
+                const v = stateVoice.botDataArray[i] / 255;
+                const barHeight = v * height * 0.9;
+                const x = i * barWidth;
+                const y = height - barHeight;
+                const hue = 200 - v * 100;
+                const grad = botCtx.createLinearGradient(x, y, x, height);
+                grad.addColorStop(0, `hsl(${hue}, 100%, ${50 + v * 30}%)`);
+                grad.addColorStop(1, `hsl(${hue}, 100%, ${20 + v * 10}%)`);
+                botCtx.fillStyle = grad;
+                botCtx.fillRect(x + 1, y, barWidth - 2, barHeight);
+            }
+        } catch (error) {
+            console.warn('[VoiceChat] Error drawing bot oscillations:', error);
         }
     }
     
@@ -384,7 +420,17 @@ export function initVoiceChatTab(elements, state) {
     }
     
     async function startRecording() {
-        if (stateVoice.isRecording) return;
+        if (stateVoice.isRecording) {
+            console.warn('[VoiceChat] Already recording, ignoring start request');
+            return;
+        }
+        
+        // Prevent race conditions
+        if (stateVoice._isStarting) {
+            console.warn('[VoiceChat] Recording start already in progress');
+            return;
+        }
+        stateVoice._isStarting = true;
         
         // Get selected language and voice
         const selectedLang = languageSelect?.value || DEFAULT_LANGUAGE;
@@ -461,15 +507,31 @@ export function initVoiceChatTab(elements, state) {
             startMicVisualization();
             showToast('success', 'Recording started');
             updateTranscriptUI('');
+            stateVoice._isStarting = false;
         } catch (err) {
+            console.error('[VoiceChat] Error starting recording:', err);
             showToast('error', `Failed to start: ${err.message}`);
             setMicStatus('Click to start', false);
+            stateVoice._isStarting = false;
+            // Cleanup on error
+            if (stateVoice.mediaStream) {
+                stateVoice.mediaStream.getTracks().forEach(t => t.stop());
+                stateVoice.mediaStream = null;
+            }
+            if (stateVoice.audioContext) {
+                try { stateVoice.audioContext.close(); } catch {}
+                stateVoice.audioContext = null;
+            }
         }
     }
     
     function stopRecording() {
-        if (!stateVoice.isRecording) return;
+        if (!stateVoice.isRecording) {
+            console.warn('[VoiceChat] Not recording, ignoring stop request');
+            return;
+        }
         stateVoice.isRecording = false;
+        stateVoice._isStarting = false;
         if (stateVoice.speechRecognition) {
             try { stateVoice.speechRecognition.stop(); } catch {}
             stateVoice.speechRecognition = null;
@@ -587,7 +649,13 @@ export function initVoiceChatTab(elements, state) {
         bubble.textContent = text;
         wrapper.appendChild(bubble);
         convoLog.appendChild(wrapper);
-        convoLog.scrollTop = convoLog.scrollHeight;
+        // Smooth scroll to bottom
+        requestAnimationFrame(() => {
+            convoLog.scrollTo({
+                top: convoLog.scrollHeight,
+                behavior: 'smooth'
+            });
+        });
         return bubble;
     }
 
@@ -632,12 +700,20 @@ export function initVoiceChatTab(elements, state) {
     }
     
     function onMicClick() {
+        // Prevent rapid clicks
+        if (stateVoice._isStarting) {
+            console.warn('[VoiceChat] Operation in progress, ignoring click');
+            return;
+        }
+        
         // If assistant is speaking, finalize text and stop audio
         if (stateVoice.botAudio && !stateVoice.botAudio.paused) {
             try {
                 stateVoice.botAudio.pause();
                 stateVoice.botAudio.currentTime = 0;
-            } catch {}
+            } catch (e) {
+                console.warn('[VoiceChat] Error pausing bot audio:', e);
+            }
             if (stateVoice.wordReveal?.active && stateVoice.wordReveal.targetEl) {
                 stateVoice.wordReveal.targetEl.textContent = stateVoice.wordReveal.fullText || stateVoice.wordReveal.words.join(' ');
                 stateVoice.wordReveal.active = false;
@@ -645,16 +721,22 @@ export function initVoiceChatTab(elements, state) {
                 if (stateVoice.wordReveal.cleanup && stateVoice.botAudio) {
                     try {
                         stateVoice.wordReveal.cleanup();
-                    } catch {}
+                    } catch (e) {
+                        console.warn('[VoiceChat] Error cleaning up word reveal:', e);
+                    }
                 }
             }
             if (stateVoice.botAudio._spectrogramCleanup) {
-                try { stateVoice.botAudio._spectrogramCleanup(); } catch {}
+                try { stateVoice.botAudio._spectrogramCleanup(); } catch (e) {
+                    console.warn('[VoiceChat] Error cleaning up spectrogram:', e);
+                }
                 stateVoice.botAudio._spectrogramCleanup = null;
             }
             try {
                 if (stateVoice.botAnalyser) stateVoice.botAnalyser.disconnect();
-            } catch {}
+            } catch (e) {
+                console.warn('[VoiceChat] Error disconnecting bot analyser:', e);
+            }
         }
         if (stateVoice.isRecording) {
             stopRecording();
@@ -665,12 +747,17 @@ export function initVoiceChatTab(elements, state) {
 
     // Voice select change handler is already set up above (lines 94-138)
     
-    micBtn.addEventListener('click', onMicClick);
+    // Add click handler with error handling
+    if (micBtn) {
+        micBtn.addEventListener('click', onMicClick);
+    } else {
+        console.error('[VoiceChat] Mic button not found, cannot attach click handler');
+    }
     
     return {
         populateVoiceDropdown: populateVoiceDropdowns,
         cleanup: () => {
-            window.removeEventListener('resize', resizeCanvases);
+            window.removeEventListener('resize', resizeHandler);
             if (stateVoice.isRecording) stopRecording();
             stopMicVisualization();
             // Cleanup word reveal listeners
@@ -678,7 +765,9 @@ export function initVoiceChatTab(elements, state) {
                 try {
                     stateVoice.wordReveal.cleanup();
                     stateVoice.wordReveal.active = false;
-                } catch {}
+                } catch (e) {
+                    console.warn('[VoiceChat] Error cleaning up word reveal:', e);
+                }
             }
             if (stateVoice.botAudio) {
                 try { 
@@ -686,16 +775,22 @@ export function initVoiceChatTab(elements, state) {
                     if (stateVoice.botAudio._spectrogramCleanup) {
                         try { stateVoice.botAudio._spectrogramCleanup(); } catch {}
                     }
-                } catch {}
+                } catch (e) {
+                    console.warn('[VoiceChat] Error cleaning up bot audio:', e);
+                }
                 stateVoice.botAudio = null;
             }
             if (stateVoice.botAudioContext) {
-                try { stateVoice.botAudioContext.close(); } catch {}
+                try { stateVoice.botAudioContext.close(); } catch (e) {
+                    console.warn('[VoiceChat] Error closing bot audio context:', e);
+                }
                 stateVoice.botAudioContext = null;
             }
             // Cleanup bot analyser
             if (stateVoice.botAnalyser) {
-                try { stateVoice.botAnalyser.disconnect(); } catch {}
+                try { stateVoice.botAnalyser.disconnect(); } catch (e) {
+                    console.warn('[VoiceChat] Error disconnecting bot analyser:', e);
+                }
                 stateVoice.botAnalyser = null;
             }
         }

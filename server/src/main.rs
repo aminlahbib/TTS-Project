@@ -99,15 +99,9 @@ async fn main() -> anyhow::Result<()> {
 async fn async_main() -> anyhow::Result<()> {
     info!("Starting TTS/LLM server...");
 
-    let provider_env = std::env::var("LLM_PROVIDER").unwrap_or_else(|_| "ollama".into());
-    let provider = match provider_env.as_str() {
-        "openai" => LlmProvider::OpenAI,
-        _ => LlmProvider::Ollama, // Default to Ollama
-    };
-    let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| match provider {
-        LlmProvider::OpenAI => "gpt-3.5-turbo".into(),
-        LlmProvider::Ollama => "llama2".into(),
-    });
+    // Always use Ollama as the LLM provider
+    let provider = LlmProvider::Ollama;
+    let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| "llama3".into());
 
     let llm = if let Ok(url) = std::env::var("QDRANT_URL") {
         if !url.trim().is_empty() {
@@ -271,15 +265,9 @@ pub struct LlmProviderResponse {
     pub model: String,
 }
 
-pub async fn llm_provider_endpoint(State(state): State<AppState>) -> Json<LlmProviderResponse> {
-    let provider_str = match state.llm_provider {
-        LlmProvider::OpenAI => "openai",
-        LlmProvider::Ollama => "ollama",
-    };
-    let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| match state.llm_provider {
-        LlmProvider::OpenAI => "gpt-3.5-turbo".into(),
-        LlmProvider::Ollama => "llama2".into(),
-    });
+pub async fn llm_provider_endpoint(_state: State<AppState>) -> Json<LlmProviderResponse> {
+    let provider_str = "ollama";
+    let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| "llama3".into());
     Json(LlmProviderResponse {
         provider: provider_str.to_string(),
         model,

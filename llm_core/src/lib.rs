@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use futures::Stream;
 use qdrant_client::{
@@ -17,19 +17,16 @@ use std::{
     env,
     pin::Pin,
     sync::{Arc, Mutex},
-    thread,
     time::Duration,
 };
 use tokio::runtime::Handle;
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use uuid::Uuid;
-use rand::{thread_rng, Rng};
 
 /* ---------------------- Public types ---------------------- */
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum LlmProvider {
-    OpenAI,
     Ollama,
 }
 
@@ -59,268 +56,6 @@ pub trait LlmProviderTrait {
         &self,
         messages: &[Message],
     ) -> Pin<Box<dyn Stream<Item = Result<String>> + Send>>;
-}
-
-/* ------------ OpenAI client with retries & quota handling ------------ */
-
-pub struct OpenAiClient {
-    api_key: String,
-    org_id: Option<String>,
-    client: std::sync::OnceLock<Client>,
-    model: String,
-    max_tokens: u16,
-    max_retries: usize,
-    backoff_ms: u64,
-    timeout_secs: u64,
-}
-
-impl OpenAiClient {
-    pub fn new(model: &str) -> Result<Self> {
-        let api_key = env::var("OPENAI_API_KEY")
-            .context("OPENAI_API_KEY must be set")?;
-        Ok(Self {
-            api_key,
-            org_id: env::var("OPENAI_ORG_ID").ok(),
-            client: std::sync::OnceLock::new(),
-            model: model.to_string(),
-            max_tokens: env::var("OPENAI_MAX_TOKENS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(512),
-            max_retries: env::var("OPENAI_MAX_RETRIES")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(5),
-            backoff_ms: env::var("OPENAI_BACKOFF_MS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(500),
-            timeout_secs: env::var("OPENAI_TIMEOUT_SECS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(60),
-        })
-    }
-
-    fn get_client(&self) -> &Client {
-        self.client.get_or_init(|| {
-            ClientBuilder::new()
-                .timeout(Duration::from_secs(self.timeout_secs))
-                .tcp_keepalive(Duration::from_secs(60)) // Keep connections alive for reuse
-                .pool_max_idle_per_host(10) // Connection pooling for better performance
-                .build()
-                .unwrap()
-        })
-    }
-
-    fn backoff(&self, attempt: usize, retry_after_secs: Option<u64>) -> Duration {
-        if let Some(secs) = retry_after_secs {
-            return Duration::from_secs(secs.max(1));
-        }
-        let exp = (attempt as u32).min(16);
-        let factor = 1u64 << exp;
-        let base = self.backoff_ms.saturating_mul(factor);
-        let jitter = thread_rng().gen_range(0..(self.backoff_ms / 2).max(1));
-        Duration::from_millis(base + jitter)
-    }
-}
-
-impl LlmProviderTrait for OpenAiClient {
-    fn provider_type(&self) -> LlmProvider {
-        LlmProvider::OpenAI
-    }
-
-    fn chat(&self, messages: &[Message]) -> Result<String> {
-        #[derive(Serialize)]
-        struct ApiMsg<'a> { role: &'a str, content: &'a str }
-        #[derive(Serialize)]
-        struct Req<'a> { model: &'a str, messages: Vec<ApiMsg<'a>>, max_tokens: u16 }
-        #[derive(Deserialize)]
-        struct Resp { choices: Vec<Choice> }
-        #[derive(Deserialize)]
-        struct Choice { message: RMsg }
-        #[derive(Deserialize)]
-        struct RMsg { content: String }
-
-        let url = "https://api.openai.com/v1/chat/completions";
-        let msgs: Vec<ApiMsg> = messages.iter().map(|m| ApiMsg { role: &m.role, content: &m.content }).collect();
-        let body = Req { model: &self.model, messages: msgs, max_tokens: self.max_tokens };
-
-        let mut last_err = None;
-
-        for attempt in 0..=self.max_retries {
-            let mut req = self.get_client()
-                .post(url)
-                .bearer_auth(&self.api_key)
-                .json(&body);
-            if let Some(org) = &self.org_id {
-                req = req.header("OpenAI-Organization", org);
-            }
-
-            match req.send() {
-                Ok(resp) => {
-                    if resp.status().is_success() {
-                        let r = resp.json::<Resp>()?;
-                        return Ok(
-                            r.choices.first()
-                                .map(|c| c.message.content.clone())
-                                .unwrap_or_else(|| "No response.".to_string())
-                        );
-                    }
-                    let status = resp.status();
-                    let retry_after = resp.headers()
-                        .get("retry-after")
-                        .and_then(|h| h.to_str().ok())
-                        .and_then(|s| s.parse::<u64>().ok());
-                    let txt = resp.text().unwrap_or_default();
-
-                    if status.as_u16() == 429 && txt.contains("\"insufficient_quota\"") {
-                        return Err(anyhow::anyhow!("OpenAI quota exceeded (insufficient_quota). Please update billing or use another provider."));
-                    }
-
-                    if status.as_u16() == 429 || status.is_server_error() {
-                        last_err = Some(anyhow::anyhow!("OpenAI HTTP {}: {}", status, txt));
-                        thread::sleep(self.backoff(attempt, retry_after));
-                        continue;
-                    }
-                    return Err(anyhow::anyhow!("OpenAI HTTP {}: {}", status, txt));
-                }
-                Err(e) => {
-                    last_err = Some(anyhow::anyhow!("OpenAI request error: {}", e));
-                    thread::sleep(self.backoff(attempt, None));
-                }
-            }
-        }
-        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("OpenAI retry exhausted")))
-    }
-
-    fn chat_stream(&self, messages: &[Message]) -> Pin<Box<dyn Stream<Item = Result<String>> + Send>> {
-        use tokio::sync::mpsc;
-        
-        // Create a channel to bridge async streaming to sync stream
-        let (tx, rx) = mpsc::channel::<Result<String>>(100);
-        let messages_clone: Vec<Message> = messages.iter().cloned().collect();
-        let api_key = self.api_key.clone();
-        let org_id = self.org_id.clone();
-        let model = self.model.clone();
-        let max_tokens = self.max_tokens;
-        let timeout_secs = self.timeout_secs;
-        
-        // Spawn async task to handle streaming
-        tokio::spawn(async move {
-            let client = reqwest::Client::builder()
-                .timeout(Duration::from_secs(timeout_secs))
-                .tcp_keepalive(Duration::from_secs(60))
-                .pool_max_idle_per_host(50)
-                .pool_idle_timeout(Duration::from_secs(90))
-                .build()
-                .unwrap();
-            
-            #[derive(Serialize)]
-            struct ApiMsg { role: String, content: String }
-            #[derive(Serialize)]
-            struct Req { 
-                model: String, 
-                messages: Vec<ApiMsg>, 
-                max_tokens: u16,
-                stream: bool,
-            }
-            #[derive(Deserialize)]
-            struct StreamChoice {
-                delta: StreamDelta,
-                #[allow(dead_code)]
-                finish_reason: Option<String>, // Reserved for future use
-            }
-            #[derive(Deserialize)]
-            struct StreamDelta {
-                content: Option<String>,
-            }
-            #[derive(Deserialize)]
-            struct StreamResp {
-                choices: Vec<StreamChoice>,
-            }
-
-            let url = "https://api.openai.com/v1/chat/completions";
-            let msgs: Vec<ApiMsg> = messages_clone.iter()
-                .map(|m| ApiMsg { role: m.role.clone(), content: m.content.clone() })
-                .collect();
-            let body = Req { 
-                model: model.clone(), 
-                messages: msgs, 
-                max_tokens,
-                stream: true,
-            };
-
-            let mut req = client.post(url)
-                .bearer_auth(&api_key)
-                .json(&body);
-            
-            if let Some(org) = &org_id {
-                req = req.header("OpenAI-Organization", org);
-            }
-
-            match req.send().await {
-                Ok(response) => {
-                    if !response.status().is_success() {
-                        let status = response.status();
-                        let text = response.text().await.unwrap_or_default();
-                        let _ = tx.send(Err(anyhow::anyhow!("OpenAI HTTP {}: {}", status, text))).await;
-                        return;
-                    }
-                    
-                    let mut stream = response.bytes_stream();
-                    let mut buffer = String::new();
-                    
-                    while let Some(item) = stream.next().await {
-                        match item {
-                            Ok(bytes) => {
-                                if let Ok(chunk) = String::from_utf8(bytes.to_vec()) {
-                                    buffer.push_str(&chunk);
-                                    
-                                    // Process complete lines
-                                    while let Some(newline_pos) = buffer.find('\n') {
-                                        let line = buffer[..newline_pos].trim().to_string();
-                                        buffer = buffer[newline_pos + 1..].to_string();
-                                        
-                                        if line.is_empty() || line == "data: [DONE]" {
-                                            continue;
-                                        }
-                                        
-                                        if let Some(json_str) = line.strip_prefix("data: ") {
-                                            match serde_json::from_str::<StreamResp>(json_str) {
-                                                Ok(resp) => {
-                                                    if let Some(choice) = resp.choices.first() {
-                                                        if let Some(content) = &choice.delta.content {
-                                                            if !content.is_empty() {
-                                                                let _ = tx.send(Ok(content.clone())).await;
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                Err(_) => {
-                                                    // Skip parse errors for malformed lines
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                let _ = tx.send(Err(anyhow::anyhow!("Stream error: {}", e))).await;
-                                break;
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    let _ = tx.send(Err(anyhow::anyhow!("Request error: {}", e))).await;
-                }
-            }
-        });
-        
-        // Convert channel receiver to stream
-        Box::pin(ReceiverStream::new(rx))
-    }
 }
 
 /* ------------------ Ollama client ------------------ */
@@ -581,7 +316,6 @@ pub struct LlmClient {
 impl LlmClient {
     pub fn new(provider_type: LlmProvider, model: &str) -> Result<Self> {
         let provider: Box<dyn LlmProviderTrait + Send + Sync> = match provider_type {
-            LlmProvider::OpenAI => Box::new(OpenAiClient::new(model)?),
             LlmProvider::Ollama => Box::new(OllamaClient::new(model)?),
         };
         Ok(Self {
@@ -593,7 +327,6 @@ impl LlmClient {
 
     pub async fn with_storage(provider_type: LlmProvider, model: &str, collection: Option<String>) -> Result<Self> {
         let provider: Box<dyn LlmProviderTrait + Send + Sync> = match provider_type {
-            LlmProvider::OpenAI => Box::new(OpenAiClient::new(model)?),
             LlmProvider::Ollama => Box::new(OllamaClient::new(model)?),
         };
         let storage = Arc::new(QdrantStorage::new(collection).await?);
