@@ -7,11 +7,6 @@
 **/*.exe
 **/*.dll
 
-# Model files (large ONNX weights)
-models/**/*.onnx
-models/**/*.onnx.json
-*.onnx
-
 # IDE and OS files
 .DS_Store
 .env
