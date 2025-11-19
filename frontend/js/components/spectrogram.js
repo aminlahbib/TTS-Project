@@ -1,87 +1,5 @@
 // Spectrogram visualization component
 
-import { CONFIG } from '../config.js';
-
-const { STREAMING } = CONFIG;
-
-/**
- * Initialize streaming spectrogram canvas
- */
-export function initStreamSpectrogram(canvas, container) {
-    if (!canvas) return null;
-    
-    const containerWidth = container?.offsetWidth || 800;
-    canvas.width = containerWidth;
-    canvas.height = 300;
-    
-    const ctx = canvas.getContext('2d');
-    const melFrames = [];
-    
-    // Clear canvas with black background
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
-    // Store canvas reference for visualizeMelFrame
-    return { ctx, melFrames, canvas };
-}
-
-/**
- * Visualize mel frame in real-time
- */
-export function visualizeMelFrame(spectrogramState, melFrame) {
-    if (!spectrogramState || !melFrame || melFrame.length === 0) return;
-    
-    const { ctx, melFrames, canvas } = spectrogramState;
-    if (!ctx || !canvas) return;
-    
-    const n_mels = melFrame.length;
-    const frameWidth = STREAMING.FRAME_WIDTH;
-    const melHeight = canvas.height;
-    
-    // Add frame to accumulation
-    melFrames.push([...melFrame]);
-    
-    // Keep only last N frames that fit on canvas
-    const maxFrames = Math.floor(canvas.width / frameWidth);
-    if (melFrames.length > maxFrames) {
-        melFrames.shift(); // Remove oldest frame
-    }
-    
-    // Limit mel frames to prevent memory issues
-    if (melFrames.length > STREAMING.MAX_MEL_FRAMES) {
-        melFrames.shift();
-    }
-    
-    // Clear canvas
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
-    // Draw all accumulated frames
-    const binHeight = melHeight / n_mels;
-    melFrames.forEach((frame, frameIndex) => {
-        const x = frameIndex * frameWidth;
-        
-        // Normalize mel values for visualization (per-frame normalization)
-        const min = Math.min(...frame);
-        const max = Math.max(...frame);
-        const range = max - min || 1;
-        
-        // Draw each mel bin
-        for (let i = 0; i < n_mels; i++) {
-            const value = frame[i];
-            const normalized = (value - min) / range;
-            
-            // Use a colormap (blue to cyan to green)
-            const hue = 240 - (normalized * 120); // Blue (240) to Cyan (120)
-            const saturation = 100;
-            const lightness = 20 + (normalized * 60); // Dark to bright
-            
-            ctx.fillStyle = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
-            ctx.fillRect(x, melHeight - (i + 1) * binHeight, frameWidth, binHeight);
-        }
-    });
-}
-
 /**
  * Visualize audio spectrogram in real-time using FFT
  * @param {HTMLCanvasElement} canvas - Canvas element to draw on
@@ -93,11 +11,8 @@ export function visualizeAudioSpectrogram(canvas, audioElement) {
         return;
     }
     
-    console.log('[Spectrogram] Setting up visualization for audio element');
-    
     // Clean up any existing visualization
     if (audioElement._spectrogramCleanup) {
-        console.log('[Spectrogram] Cleaning up previous visualization');
         audioElement._spectrogramCleanup();
     }
     
@@ -146,7 +61,6 @@ export function visualizeAudioSpectrogram(canvas, audioElement) {
     let analyser = audioElement._audioAnalyser;
     
     if (!audioContext || audioContext.state === 'closed') {
-        console.log('[Spectrogram] Creating new AudioContext');
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         audioElement._audioContext = audioContext;
         
@@ -156,15 +70,12 @@ export function visualizeAudioSpectrogram(canvas, audioElement) {
             try {
                 source = audioContext.createMediaElementSource(audioElement);
                 audioElement._audioSource = source;
-                console.log('[Spectrogram] Created new MediaElementSource');
             } catch (error) {
                 console.error('[Spectrogram] Error creating media element source:', error);
                 // If source already exists, we need to reuse the existing one
                 // This can happen if the audio element was already connected
                 return;
             }
-        } else {
-            console.log('[Spectrogram] Reusing existing MediaElementSource');
         }
         
         analyser = audioContext.createAnalyser();
@@ -175,9 +86,7 @@ export function visualizeAudioSpectrogram(canvas, audioElement) {
         // Connect the audio graph
         source.connect(analyser);
         analyser.connect(audioContext.destination);
-        console.log('[Spectrogram] Audio graph connected');
     } else {
-        console.log('[Spectrogram] Reusing existing AudioContext');
         // Make sure analyser exists
         if (!analyser) {
             analyser = audioContext.createAnalyser();
@@ -217,10 +126,8 @@ export function visualizeAudioSpectrogram(canvas, audioElement) {
     
     // Handle play event
     const playHandler = () => {
-        console.log('[Spectrogram] Play event triggered');
         // Resume AudioContext if suspended (required by some browsers)
         if (audioContext.state === 'suspended') {
-            console.log('[Spectrogram] Resuming suspended AudioContext');
             audioContext.resume().then(() => {
                 // Start animation loop immediately after resuming
                 if (!animationFrame && !audioElement.paused && !audioElement.ended) {

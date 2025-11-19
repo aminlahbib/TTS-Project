@@ -224,6 +224,68 @@ body {
     padding: 0;
 }
 
+/* Voice Chat tab special layout - full height (same as TTS and chat) */
+.main-content:has(#voiceChatSection.active) {
+    padding: 0;
+    overflow: hidden;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    max-width: 100%;
+    min-height: 0; /* Important for flex children */
+}
+
+.main-content:has(#voiceChatSection.active) .header {
+    padding: var(--space-xl) var(--space-3xl) var(--space-lg);
+    margin-bottom: 0;
+    flex-shrink: 0;
+}
+
+/* Ensure tab content container fills remaining space for Voice Chat */
+.main-content:has(#voiceChatSection.active) #tabContentContainer {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* Voice Chat section should not have padding when active (handled by main-content) */
+.main-content:has(#voiceChatSection.active) #voiceChatSection {
+    padding: 0;
+}
+
+/* Server Info tab special layout - full height (same as TTS and chat) */
+.main-content:has(#serverSection.active) {
+    padding: 0;
+    overflow: hidden;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    max-width: 100%;
+    min-height: 0; /* Important for flex children */
+}
+
+.main-content:has(#serverSection.active) .header {
+    padding: var(--space-xl) var(--space-3xl) var(--space-lg);
+    margin-bottom: 0;
+    flex-shrink: 0;
+}
+
+/* Ensure tab content container fills remaining space for Server */
+.main-content:has(#serverSection.active) #tabContentContainer {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* Server section should not have padding when active (handled by main-content) */
+.main-content:has(#serverSection.active) #serverSection {
+    padding: 0;
+}
+
 /* Custom Scrollbar - Right Positioned */
 .main-content::-webkit-scrollbar {
     width: 8px;
@@ -280,6 +342,63 @@ body {
     padding-bottom: var(--space-lg);
     border-bottom: 1px solid var(--surface-lighter);
     position: relative;
+}
+
+.header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--space-lg);
+    flex-wrap: wrap;
+}
+
+.header-left {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-sm);
+}
+
+.header-controls {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+}
+
+.llm-provider-selector {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.llm-provider-selector label {
+    color: var(--text-secondary);
+    font-size: var(--font-sm);
+    white-space: nowrap;
+}
+
+.provider-select {
+    background: var(--surface-light);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    padding: var(--space-xs) var(--space-sm);
+    font-size: var(--font-sm);
+    cursor: pointer;
+    transition: var(--transition);
+    min-width: 120px;
+}
+
+.provider-select:hover {
+    border-color: var(--border-lighter);
+    background: var(--surface-lighter);
+}
+
+.provider-select:focus {
+    outline: none;
+    border-color: var(--info);
+    box-shadow: 0 0 0 2px rgba(68, 170, 255, 0.2);
 }
 
 .header h1 {
@@ -355,7 +474,7 @@ body {
 }
 
 /* Consistent heading styles in tabs */
-.tab-content h2 {
+.tab-content > h2:first-child {
     font-size: var(--font-lg);
     font-weight: 600;
     margin-bottom: var(--space-2xl);

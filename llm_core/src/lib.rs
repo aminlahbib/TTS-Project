@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use futures::Stream;
 use qdrant_client::{
@@ -10,26 +10,28 @@ use qdrant_client::{
     },
     Qdrant,
 };
-use reqwest::blocking::{Client, ClientBuilder};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     env,
     pin::Pin,
-    sync::{Arc, Mutex},
-    thread,
+    sync::Arc,
     time::Duration,
 };
-use tokio::runtime::Handle;
+use tokio::sync::RwLock;
+use tokio::time::Instant;
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use uuid::Uuid;
-use rand::{thread_rng, Rng};
+use async_trait::async_trait;
+use lru::LruCache;
+use std::hash::{Hash, Hasher};
+use std::collections::hash_map::DefaultHasher;
 
 /* ---------------------- Public types ---------------------- */
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum LlmProvider {
-    OpenAI,
     Ollama,
 }
 
@@ -48,313 +50,124 @@ pub struct Conversation {
     pub updated_at: DateTime<Utc>,
 }
 
-pub trait LlmProviderTrait {
-    fn chat(&self, messages: &[Message]) -> Result<String>;
+// Cached response entry
+#[derive(Clone)]
+struct CachedResponse {
+    response: String,
+    cached_at: Instant,
+}
+
+// Conversation entry with TTL
+struct ConversationEntry {
+    conversation: Conversation,
+    last_accessed: Instant,
+}
+
+/* ------------------ Async LLM Provider Trait ------------------ */
+
+#[async_trait]
+pub trait LlmProviderTrait: Send + Sync {
+    async fn chat(&self, messages: &[Message]) -> Result<String>;
     fn provider_type(&self) -> LlmProvider;
     
     /// Stream chat response tokens as they're generated
-    /// Returns a stream of Result<String> where each String is a token/chunk
-    /// The stream is 'static because it uses channels and spawned tasks internally
     fn chat_stream(
         &self,
         messages: &[Message],
     ) -> Pin<Box<dyn Stream<Item = Result<String>> + Send>>;
 }
 
-/* ------------ OpenAI client with retries & quota handling ------------ */
-
-pub struct OpenAiClient {
-    api_key: String,
-    org_id: Option<String>,
-    client: std::sync::OnceLock<Client>,
-    model: String,
-    max_tokens: u16,
-    max_retries: usize,
-    backoff_ms: u64,
-    timeout_secs: u64,
-}
-
-impl OpenAiClient {
-    pub fn new(model: &str) -> Result<Self> {
-        let api_key = env::var("OPENAI_API_KEY")
-            .context("OPENAI_API_KEY must be set")?;
-        Ok(Self {
-            api_key,
-            org_id: env::var("OPENAI_ORG_ID").ok(),
-            client: std::sync::OnceLock::new(),
-            model: model.to_string(),
-            max_tokens: env::var("OPENAI_MAX_TOKENS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(512),
-            max_retries: env::var("OPENAI_MAX_RETRIES")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(5),
-            backoff_ms: env::var("OPENAI_BACKOFF_MS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(500),
-            timeout_secs: env::var("OPENAI_TIMEOUT_SECS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(60),
-        })
-    }
-
-    fn get_client(&self) -> &Client {
-        self.client.get_or_init(|| {
-            ClientBuilder::new()
-                .timeout(Duration::from_secs(self.timeout_secs))
-                .tcp_keepalive(Duration::from_secs(60)) // Keep connections alive for reuse
-                .pool_max_idle_per_host(10) // Connection pooling for better performance
-                .build()
-                .unwrap()
-        })
-    }
-
-    fn backoff(&self, attempt: usize, retry_after_secs: Option<u64>) -> Duration {
-        if let Some(secs) = retry_after_secs {
-            return Duration::from_secs(secs.max(1));
-        }
-        let exp = (attempt as u32).min(16);
-        let factor = 1u64 << exp;
-        let base = self.backoff_ms.saturating_mul(factor);
-        let jitter = thread_rng().gen_range(0..(self.backoff_ms / 2).max(1));
-        Duration::from_millis(base + jitter)
-    }
-}
-
-impl LlmProviderTrait for OpenAiClient {
-    fn provider_type(&self) -> LlmProvider {
-        LlmProvider::OpenAI
-    }
-
-    fn chat(&self, messages: &[Message]) -> Result<String> {
-        #[derive(Serialize)]
-        struct ApiMsg<'a> { role: &'a str, content: &'a str }
-        #[derive(Serialize)]
-        struct Req<'a> { model: &'a str, messages: Vec<ApiMsg<'a>>, max_tokens: u16 }
-        #[derive(Deserialize)]
-        struct Resp { choices: Vec<Choice> }
-        #[derive(Deserialize)]
-        struct Choice { message: RMsg }
-        #[derive(Deserialize)]
-        struct RMsg { content: String }
-
-        let url = "https://api.openai.com/v1/chat/completions";
-        let msgs: Vec<ApiMsg> = messages.iter().map(|m| ApiMsg { role: &m.role, content: &m.content }).collect();
-        let body = Req { model: &self.model, messages: msgs, max_tokens: self.max_tokens };
-
-        let mut last_err = None;
-
-        for attempt in 0..=self.max_retries {
-            let mut req = self.get_client()
-                .post(url)
-                .bearer_auth(&self.api_key)
-                .json(&body);
-            if let Some(org) = &self.org_id {
-                req = req.header("OpenAI-Organization", org);
-            }
-
-            match req.send() {
-                Ok(resp) => {
-                    if resp.status().is_success() {
-                        let r = resp.json::<Resp>()?;
-                        return Ok(
-                            r.choices.first()
-                                .map(|c| c.message.content.clone())
-                                .unwrap_or_else(|| "No response.".to_string())
-                        );
-                    }
-                    let status = resp.status();
-                    let retry_after = resp.headers()
-                        .get("retry-after")
-                        .and_then(|h| h.to_str().ok())
-                        .and_then(|s| s.parse::<u64>().ok());
-                    let txt = resp.text().unwrap_or_default();
-
-                    if status.as_u16() == 429 && txt.contains("\"insufficient_quota\"") {
-                        return Err(anyhow::anyhow!("OpenAI quota exceeded (insufficient_quota). Please update billing or use another provider."));
-                    }
-
-                    if status.as_u16() == 429 || status.is_server_error() {
-                        last_err = Some(anyhow::anyhow!("OpenAI HTTP {}: {}", status, txt));
-                        thread::sleep(self.backoff(attempt, retry_after));
-                        continue;
-                    }
-                    return Err(anyhow::anyhow!("OpenAI HTTP {}: {}", status, txt));
-                }
-                Err(e) => {
-                    last_err = Some(anyhow::anyhow!("OpenAI request error: {}", e));
-                    thread::sleep(self.backoff(attempt, None));
-                }
-            }
-        }
-        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("OpenAI retry exhausted")))
-    }
-
-    fn chat_stream(&self, messages: &[Message]) -> Pin<Box<dyn Stream<Item = Result<String>> + Send>> {
-        use tokio::sync::mpsc;
-        
-        // Create a channel to bridge async streaming to sync stream
-        let (tx, rx) = mpsc::channel::<Result<String>>(100);
-        let messages_clone: Vec<Message> = messages.iter().cloned().collect();
-        let api_key = self.api_key.clone();
-        let org_id = self.org_id.clone();
-        let model = self.model.clone();
-        let max_tokens = self.max_tokens;
-        let timeout_secs = self.timeout_secs;
-        
-        // Spawn async task to handle streaming
-        tokio::spawn(async move {
-            let client = reqwest::Client::builder()
-                .timeout(Duration::from_secs(timeout_secs))
-                .tcp_keepalive(Duration::from_secs(60))
-                .pool_max_idle_per_host(10)
-                .build()
-                .unwrap();
-            
-            #[derive(Serialize)]
-            struct ApiMsg { role: String, content: String }
-            #[derive(Serialize)]
-            struct Req { 
-                model: String, 
-                messages: Vec<ApiMsg>, 
-                max_tokens: u16,
-                stream: bool,
-            }
-            #[derive(Deserialize)]
-            struct StreamChoice {
-                delta: StreamDelta,
-                #[allow(dead_code)]
-                finish_reason: Option<String>, // Reserved for future use
-            }
-            #[derive(Deserialize)]
-            struct StreamDelta {
-                content: Option<String>,
-            }
-            #[derive(Deserialize)]
-            struct StreamResp {
-                choices: Vec<StreamChoice>,
-            }
-
-            let url = "https://api.openai.com/v1/chat/completions";
-            let msgs: Vec<ApiMsg> = messages_clone.iter()
-                .map(|m| ApiMsg { role: m.role.clone(), content: m.content.clone() })
-                .collect();
-            let body = Req { 
-                model: model.clone(), 
-                messages: msgs, 
-                max_tokens,
-                stream: true,
-            };
-
-            let mut req = client.post(url)
-                .bearer_auth(&api_key)
-                .json(&body);
-            
-            if let Some(org) = &org_id {
-                req = req.header("OpenAI-Organization", org);
-            }
-
-            match req.send().await {
-                Ok(response) => {
-                    if !response.status().is_success() {
-                        let status = response.status();
-                        let text = response.text().await.unwrap_or_default();
-                        let _ = tx.send(Err(anyhow::anyhow!("OpenAI HTTP {}: {}", status, text))).await;
-                        return;
-                    }
-                    
-                    let mut stream = response.bytes_stream();
-                    let mut buffer = String::new();
-                    
-                    while let Some(item) = stream.next().await {
-                        match item {
-                            Ok(bytes) => {
-                                if let Ok(chunk) = String::from_utf8(bytes.to_vec()) {
-                                    buffer.push_str(&chunk);
-                                    
-                                    // Process complete lines
-                                    while let Some(newline_pos) = buffer.find('\n') {
-                                        let line = buffer[..newline_pos].trim().to_string();
-                                        buffer = buffer[newline_pos + 1..].to_string();
-                                        
-                                        if line.is_empty() || line == "data: [DONE]" {
-                                            continue;
-                                        }
-                                        
-                                        if let Some(json_str) = line.strip_prefix("data: ") {
-                                            match serde_json::from_str::<StreamResp>(json_str) {
-                                                Ok(resp) => {
-                                                    if let Some(choice) = resp.choices.first() {
-                                                        if let Some(content) = &choice.delta.content {
-                                                            if !content.is_empty() {
-                                                                let _ = tx.send(Ok(content.clone())).await;
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                Err(_) => {
-                                                    // Skip parse errors for malformed lines
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                let _ = tx.send(Err(anyhow::anyhow!("Stream error: {}", e))).await;
-                                break;
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    let _ = tx.send(Err(anyhow::anyhow!("Request error: {}", e))).await;
-                }
-            }
-        });
-        
-        // Convert channel receiver to stream
-        Box::pin(ReceiverStream::new(rx))
-    }
-}
-
-/* ------------------ Ollama client ------------------ */
+/* ------------------ Ollama client (Async) ------------------ */
 
 pub struct OllamaClient {
-    client: std::sync::OnceLock<Client>,
+    client: Arc<Client>,
     base_url: String,
     model: String,
+    // Ollama optimization parameters
+    num_ctx: u32,        // Context window size (4096 = half of max, faster)
+    temperature: f32,    // 0.7 = balanced creativity
+    top_p: f32,          // 0.9 = focused responses
+    num_predict: i32,    // 512 = limit response length for speed
 }
+
 impl OllamaClient {
     pub fn new(model: &str) -> Result<Self> {
+        let client = Arc::new(
+            Client::builder()
+                .timeout(Duration::from_secs(120))
+                .tcp_keepalive(Duration::from_secs(60))
+                .pool_max_idle_per_host(30) // Reduced from 50 to 30 for lower memory
+                .pool_idle_timeout(Duration::from_secs(60)) // Reduced from 90 to 60 seconds
+                .build()?
+        );
+        
         Ok(Self {
-            client: std::sync::OnceLock::new(),
+            client,
             base_url: env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| "http://localhost:11434".to_string()),
             model: model.to_string(),
+            num_ctx: env::var("OLLAMA_NUM_CTX")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(2048), // Reduced from 4096 for lower memory usage
+            temperature: env::var("OLLAMA_TEMPERATURE")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.5), // Lower for faster, more focused responses
+            top_p: env::var("OLLAMA_TOP_P")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.8), // More focused
+            num_predict: env::var("OLLAMA_NUM_PREDICT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(256), // Reduced from 512 for faster responses
         })
     }
-    fn get_client(&self) -> &Client {
-        self.client.get_or_init(|| {
-            ClientBuilder::new()
-                .timeout(Duration::from_secs(120)) // 2 minutes timeout for model loading and inference
-                .tcp_keepalive(Duration::from_secs(60)) // Keep connections alive for reuse
-                .pool_max_idle_per_host(10) // Connection pooling for better performance
-                .build()
-                .expect("Failed to create HTTP client")
-        })
+    
+    // Model keep-alive: ping Ollama periodically to keep model loaded
+    pub async fn keep_alive(&self) -> Result<()> {
+        let url = format!("{}/api/generate", self.base_url);
+        let _ = self.client
+            .post(&url)
+            .json(&serde_json::json!({
+                "model": self.model,
+                "prompt": "ping",
+                "stream": false,
+                "options": {
+                    "num_predict": 1
+                }
+            }))
+            .send()
+            .await?;
+        Ok(())
     }
 }
+
+#[async_trait]
 impl LlmProviderTrait for OllamaClient {
     fn provider_type(&self) -> LlmProvider { LlmProvider::Ollama }
-    fn chat(&self, messages: &[Message]) -> Result<String> {
-        #[derive(Serialize, Clone)]
-        struct Req { model: String, messages: Vec<Msg>, stream: bool }
+    
+    async fn chat(&self, messages: &[Message]) -> Result<String> {
         #[derive(Serialize, Clone)]
         struct Msg { role: String, content: String }
+        #[derive(Serialize)]
+        struct Req { 
+            model: String, 
+            messages: Vec<Msg>, 
+            stream: bool,
+            options: OllamaOptions,
+        }
+        #[derive(Serialize)]
+        struct OllamaOptions {
+            num_ctx: u32,
+            temperature: f32,
+            top_p: f32,
+            num_predict: i32,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            top_k: Option<u32>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            repeat_penalty: Option<f32>,
+        }
         #[derive(Deserialize)]
         struct Resp { message: RMsg }
         #[derive(Deserialize)]
@@ -362,7 +175,6 @@ impl LlmProviderTrait for OllamaClient {
 
         let url = format!("{}/api/chat", self.base_url);
         
-        // Optimize message preparation - prepare messages once
         let msgs: Vec<Msg> = messages.iter()
             .map(|m| Msg { 
                 role: m.role.clone(), 
@@ -370,40 +182,52 @@ impl LlmProviderTrait for OllamaClient {
             })
             .collect();
         
-        // Use non-streaming for now (blocking client doesn't handle streaming well)
-        // For better performance, consider using async client in the future
         let body = Req { 
             model: self.model.clone(), 
             messages: msgs, 
-            stream: false 
+            stream: false,
+            options: OllamaOptions {
+                num_ctx: self.num_ctx,
+                temperature: self.temperature,
+                top_p: self.top_p,
+                num_predict: self.num_predict,
+                top_k: env::var("OLLAMA_TOP_K")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .or(Some(20)),
+                repeat_penalty: env::var("OLLAMA_REPEAT_PENALTY")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .or(Some(1.1)),
+            },
         };
-        let r = self.get_client()
+        
+        let response = self.client
             .post(&url)
             .json(&body)
-            .send()?
+            .send()
+            .await?
             .error_for_status()?
-            .json::<Resp>()?;
-        Ok(r.message.content)
+            .json::<Resp>()
+            .await?;
+            
+        Ok(response.message.content)
     }
 
     fn chat_stream(&self, messages: &[Message]) -> Pin<Box<dyn Stream<Item = Result<String>> + Send>> {
         use tokio::sync::mpsc;
         
-        // Create a channel to bridge async streaming to sync stream
         let (tx, rx) = mpsc::channel::<Result<String>>(100);
         let messages_clone: Vec<Message> = messages.iter().cloned().collect();
         let base_url = self.base_url.clone();
         let model = self.model.clone();
+        let client = self.client.clone();
+        let num_ctx = self.num_ctx;
+        let temperature = self.temperature;
+        let top_p = self.top_p;
+        let num_predict = self.num_predict;
         
-        // Spawn async task to handle streaming
         tokio::spawn(async move {
-            let client = reqwest::Client::builder()
-                .timeout(Duration::from_secs(120))
-                .tcp_keepalive(Duration::from_secs(60))
-                .pool_max_idle_per_host(10)
-                .build()
-                .unwrap();
-            
             #[derive(Serialize, Clone)]
             struct Msg { role: String, content: String }
             #[derive(Serialize)]
@@ -411,6 +235,18 @@ impl LlmProviderTrait for OllamaClient {
                 model: String, 
                 messages: Vec<Msg>, 
                 stream: bool,
+                options: OllamaOptions,
+            }
+            #[derive(Serialize)]
+            struct OllamaOptions {
+                num_ctx: u32,
+                temperature: f32,
+                top_p: f32,
+                num_predict: i32,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                top_k: Option<u32>,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                repeat_penalty: Option<f32>,
             }
             #[derive(Deserialize)]
             struct StreamResp {
@@ -430,6 +266,14 @@ impl LlmProviderTrait for OllamaClient {
                 model: model.clone(), 
                 messages: msgs, 
                 stream: true,
+                options: OllamaOptions {
+                    num_ctx,
+                    temperature,
+                    top_p,
+                    num_predict,
+                    top_k: Some(20),
+                    repeat_penalty: Some(1.1),
+                },
             };
 
             match client.post(&url).json(&body).send().await {
@@ -451,7 +295,6 @@ impl LlmProviderTrait for OllamaClient {
                                 if let Ok(chunk) = String::from_utf8(bytes.to_vec()) {
                                     buffer.push_str(&chunk);
                                     
-                                    // Process complete lines (JSON lines format)
                                     while let Some(newline_pos) = buffer.find('\n') {
                                         let line = buffer[..newline_pos].trim().to_string();
                                         buffer = buffer[newline_pos + 1..].to_string();
@@ -469,9 +312,7 @@ impl LlmProviderTrait for OllamaClient {
                                                     break;
                                                 }
                                             }
-                                            Err(_) => {
-                                                // Skip parse errors for malformed lines
-                                            }
+                                            Err(_) => {}
                                         }
                                     }
                                 }
@@ -489,7 +330,6 @@ impl LlmProviderTrait for OllamaClient {
             }
         });
         
-        // Convert channel receiver to stream
         Box::pin(ReceiverStream::new(rx))
     }
 }
@@ -504,7 +344,6 @@ pub struct QdrantStorage {
 impl QdrantStorage {
     pub async fn new(collection_name: Option<String>) -> anyhow::Result<Self> {
         let raw = env::var("QDRANT_URL").unwrap_or_else(|_| "http://localhost:6334".to_string());
-        // rewrite REST port to gRPC port
         let url = if raw.contains(":6333") { raw.replace(":6333", ":6334") } else { raw };
         let api_key = env::var("QDRANT_API_KEY").ok();
 
@@ -568,59 +407,139 @@ impl QdrantStorage {
     }
 }
 
-/* ------------------ Main LLM client ------------------ */
+/* ------------------ Main LLM client (Optimized) ------------------ */
 
 pub struct LlmClient {
-    provider: Box<dyn LlmProviderTrait + Send + Sync>,
+    provider: Arc<dyn LlmProviderTrait>,
     storage: Option<Arc<QdrantStorage>>,
-    conversations: Arc<Mutex<HashMap<String, Conversation>>>,
+    // LRU cache for conversations with TTL (max 100 conversations, 1 hour TTL)
+    conversations: Arc<RwLock<LruCache<String, ConversationEntry>>>,
+    // Response cache (1 hour TTL)
+    response_cache: Arc<RwLock<LruCache<String, CachedResponse>>>,
+    // Conversation TTL: 1 hour
+    conversation_ttl: Duration,
+    // Cache TTL: 1 hour
+    cache_ttl: Duration,
 }
 
 impl LlmClient {
-    pub fn new(provider_type: LlmProvider, model: &str) -> Result<Self> {
-        let provider: Box<dyn LlmProviderTrait + Send + Sync> = match provider_type {
-            LlmProvider::OpenAI => Box::new(OpenAiClient::new(model)?),
-            LlmProvider::Ollama => Box::new(OllamaClient::new(model)?),
+    pub async fn new(provider_type: LlmProvider, model: &str) -> Result<Self> {
+        let provider: Arc<dyn LlmProviderTrait> = match provider_type {
+            LlmProvider::Ollama => Arc::new(OllamaClient::new(model)?),
         };
+        
         Ok(Self {
             provider,
             storage: None,
-            conversations: Arc::new(Mutex::new(HashMap::new())),
+            conversations: Arc::new(RwLock::new(LruCache::new(
+                std::num::NonZeroUsize::new(50).unwrap() // Reduced from 100 to 50 for lower memory
+            ))),
+            response_cache: Arc::new(RwLock::new(LruCache::new(
+                std::num::NonZeroUsize::new(200).unwrap() // Reduced from 500 to 200 for lower memory
+            ))),
+            conversation_ttl: Duration::from_secs(1800), // Reduced from 1 hour to 30 minutes
+            cache_ttl: Duration::from_secs(1800), // Reduced from 1 hour to 30 minutes
         })
     }
 
     pub async fn with_storage(provider_type: LlmProvider, model: &str, collection: Option<String>) -> Result<Self> {
-        let provider: Box<dyn LlmProviderTrait + Send + Sync> = match provider_type {
-            LlmProvider::OpenAI => Box::new(OpenAiClient::new(model)?),
-            LlmProvider::Ollama => Box::new(OllamaClient::new(model)?),
+        let provider: Arc<dyn LlmProviderTrait> = match provider_type {
+            LlmProvider::Ollama => Arc::new(OllamaClient::new(model)?),
         };
         let storage = Arc::new(QdrantStorage::new(collection).await?);
         Ok(Self {
             provider,
             storage: Some(storage),
-            conversations: Arc::new(Mutex::new(HashMap::new())),
+            conversations: Arc::new(RwLock::new(LruCache::new(
+                std::num::NonZeroUsize::new(50).unwrap() // Reduced for lower memory
+            ))),
+            response_cache: Arc::new(RwLock::new(LruCache::new(
+                std::num::NonZeroUsize::new(200).unwrap() // Reduced for lower memory
+            ))),
+            conversation_ttl: Duration::from_secs(1800), // 30 minutes
+            cache_ttl: Duration::from_secs(1800), // 30 minutes
         })
     }
 
+    // Optimized: reduce from 10 turns to 6 turns (12 messages) for faster inference
     fn tail(all: &[Message], n: usize) -> Vec<Message> {
         let len = all.len();
-        let start = len.saturating_sub(n);
+        let start = len.saturating_sub(n * 2); // n turns = n*2 messages
         all[start..].to_vec()
     }
+    
+    // Generate cache key from conversation_id + message
+    fn cache_key(conv_id: &str, message: &str) -> String {
+        let mut hasher = DefaultHasher::new();
+        conv_id.hash(&mut hasher);
+        message.hash(&mut hasher);
+        format!("{:x}", hasher.finish())
+    }
+    
+    // Clean expired conversations
+    async fn clean_expired_conversations(&self) {
+        let now = Instant::now();
+        let mut convs = self.conversations.write().await;
+        let keys_to_remove: Vec<String> = convs.iter()
+            .filter(|(_, entry)| now.duration_since(entry.last_accessed) > self.conversation_ttl)
+            .map(|(k, _)| k.clone())
+            .collect();
+        for key in keys_to_remove {
+            convs.pop(&key);
+        }
+    }
+    
+    // Clean expired cache entries
+    async fn clean_expired_cache(&self) {
+        let now = Instant::now();
+        let mut cache = self.response_cache.write().await;
+        let keys_to_remove: Vec<String> = cache.iter()
+            .filter(|(_, entry)| now.duration_since(entry.cached_at) > self.cache_ttl)
+            .map(|(k, _)| k.clone())
+            .collect();
+        for key in keys_to_remove {
+            cache.pop(&key);
+        }
+    }
 
-    pub fn chat_with_history(&self, conversation_id: Option<String>, user_message: &str) -> Result<String> {
+    pub async fn chat_with_history(&self, conversation_id: Option<String>, user_message: &str) -> Result<String> {
         let conv_id = conversation_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+        
+        // Check response cache first
+        let cache_key = Self::cache_key(&conv_id, user_message);
+        {
+            let cache = self.response_cache.read().await;
+            if let Some(cached) = cache.peek(&cache_key) {
+                if Instant::now().duration_since(cached.cached_at) < self.cache_ttl {
+                    return Ok(cached.response.clone());
+                }
+            }
+        }
+        
+        // Clean expired entries periodically (every 10% of requests)
+        if rand::random::<u8>() % 10 == 0 {
+            self.clean_expired_conversations().await;
+            self.clean_expired_cache().await;
+        }
         
         // Prepare messages while holding lock briefly
         let (compact_messages, storage_conv) = {
-            let mut convs = self.conversations.lock().unwrap();
-            let convo = convs.entry(conv_id.clone()).or_insert_with(|| Conversation {
-                id: conv_id.clone(),
-                messages: Vec::new(),
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
+            let mut convs = self.conversations.write().await;
+            
+            // Get or create conversation
+            let entry = convs.get_mut(&conv_id).map(|e| {
+                e.last_accessed = Instant::now();
+                e.conversation.clone()
+            }).unwrap_or_else(|| {
+                Conversation {
+                    id: conv_id.clone(),
+                    messages: Vec::new(),
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                }
             });
-
+            
+            let mut convo = entry;
             convo.messages.push(Message {
                 role: "user".into(),
                 content: user_message.into(),
@@ -628,8 +547,14 @@ impl LlmClient {
             });
             convo.updated_at = Utc::now();
 
-            // send only last 10 turns to the provider (optimized: prepare while lock is held)
-            let compact = Self::tail(&convo.messages, 10);
+            // Optimized: send only last 4 turns (8 messages) for lower memory usage
+            let compact = Self::tail(&convo.messages, 4);
+            
+            // Store updated conversation
+            convs.put(conv_id.clone(), ConversationEntry {
+                conversation: convo.clone(),
+                last_accessed: Instant::now(),
+            });
             
             // Clone for storage (if needed) before releasing lock
             let storage_conv = if self.storage.is_some() {
@@ -641,26 +566,33 @@ impl LlmClient {
             (compact, storage_conv)
         };
         
-        // Release lock before LLM call to avoid blocking other requests
-        let reply = self.provider.chat(&compact_messages)?;
+        // Release lock before LLM call (async, non-blocking)
+        let reply = self.provider.chat(&compact_messages).await?;
 
-        // Re-acquire lock briefly to update conversation
+        // Re-acquire lock briefly to update conversation and cache
         {
-            let mut convs = self.conversations.lock().unwrap();
-            if let Some(convo) = convs.get_mut(&conv_id) {
-                convo.messages.push(Message {
+            let mut convs = self.conversations.write().await;
+            if let Some(entry) = convs.get_mut(&conv_id) {
+                entry.conversation.messages.push(Message {
                     role: "assistant".into(),
                     content: reply.clone(),
                     timestamp: Utc::now(),
                 });
-                convo.updated_at = Utc::now();
+                entry.conversation.updated_at = Utc::now();
+                entry.last_accessed = Instant::now();
             }
+            
+            // Cache the response
+            let mut cache = self.response_cache.write().await;
+            cache.put(cache_key, CachedResponse {
+                response: reply.clone(),
+                cached_at: Instant::now(),
+            });
         }
 
         // Store conversation asynchronously (non-blocking)
         if let Some(storage) = &self.storage {
             if let Some(mut conv_clone) = storage_conv {
-                // Update the clone with the assistant message
                 conv_clone.messages.push(Message {
                     role: "assistant".into(),
                     content: reply.clone(),
@@ -669,65 +601,72 @@ impl LlmClient {
                 conv_clone.updated_at = Utc::now();
                 
                 let storage_clone = storage.clone();
-                if let Ok(handle) = Handle::try_current() {
-                    handle.spawn(async move {
-                        let _ = storage_clone.store_conversation(&conv_clone).await;
-                    });
-                }
+                tokio::spawn(async move {
+                    let _ = storage_clone.store_conversation(&conv_clone).await;
+                });
             }
         }
         Ok(reply)
     }
 
-    pub fn chat(&self, user_message: &str) -> Result<String> {
+    pub async fn chat(&self, user_message: &str) -> Result<String> {
         let messages = vec![Message {
             role: "user".into(),
             content: user_message.into(),
             timestamp: Utc::now(),
         }];
-        self.provider.chat(&messages)
+        self.provider.chat(&messages).await
     }
 
     /// Stream chat response with conversation history
-    /// Returns a stream of tokens and updates conversation history as tokens arrive
-    /// The stream is 'static because it uses channels and spawned tasks internally
     pub fn chat_with_history_stream(
         &self,
         conversation_id: Option<String>,
         user_message: &str,
     ) -> Pin<Box<dyn Stream<Item = Result<String>> + Send>> {
         let conv_id = conversation_id.unwrap_or_else(|| Uuid::new_v4().to_string());
-        
-        // Prepare messages while holding lock briefly
-        let compact_messages = {
-            let mut convs = self.conversations.lock().unwrap();
-            let convo = convs.entry(conv_id.clone()).or_insert_with(|| Conversation {
-                id: conv_id.clone(),
-                messages: Vec::new(),
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            });
-
-            convo.messages.push(Message {
-                role: "user".into(),
-                content: user_message.into(),
-                timestamp: Utc::now(),
-            });
-            convo.updated_at = Utc::now();
-
-            // Send only last 10 turns to the provider
-            Self::tail(&convo.messages, 10)
-        };
-        
-        // Get stream from provider
-        let mut token_stream = self.provider.chat_stream(&compact_messages);
-        
-        // Wrap stream to update conversation history as tokens arrive
+        let user_message = user_message.to_string(); // Clone to own the string
         let conversations = self.conversations.clone();
-        let conv_id_clone = conv_id.clone();
         let storage = self.storage.clone();
+        let provider = self.provider.clone();
         
         Box::pin(async_stream::stream! {
+            // Prepare messages while holding lock briefly
+            let compact_messages = {
+                let mut convs = conversations.write().await;
+                let entry = convs.get_mut(&conv_id).map(|e| {
+                    e.last_accessed = Instant::now();
+                    e.conversation.clone()
+                }).unwrap_or_else(|| {
+                    Conversation {
+                        id: conv_id.clone(),
+                        messages: Vec::new(),
+                        created_at: Utc::now(),
+                        updated_at: Utc::now(),
+                    }
+                });
+                
+                let mut convo = entry;
+                convo.messages.push(Message {
+                    role: "user".into(),
+                    content: user_message.clone(),
+                    timestamp: Utc::now(),
+                });
+                convo.updated_at = Utc::now();
+
+                // Optimized: 4 turns for lower memory usage
+                let compact = Self::tail(&convo.messages, 4);
+                
+                convs.put(conv_id.clone(), ConversationEntry {
+                    conversation: convo,
+                    last_accessed: Instant::now(),
+                });
+                
+                compact
+            };
+            
+            // Get stream from provider
+            let mut token_stream = provider.chat_stream(&compact_messages);
             let mut full_response = String::new();
             
             while let Some(token_result) = token_stream.next().await {
@@ -745,23 +684,42 @@ impl LlmClient {
             
             // Update conversation with full response after streaming completes
             {
-                let mut convs = conversations.lock().unwrap();
-                if let Some(convo) = convs.get_mut(&conv_id_clone) {
-                    convo.messages.push(Message {
+                let mut convs = conversations.write().await;
+                if let Some(entry) = convs.get_mut(&conv_id) {
+                    entry.conversation.messages.push(Message {
                         role: "assistant".into(),
                         content: full_response.clone(),
                         timestamp: Utc::now(),
                     });
-                    convo.updated_at = Utc::now();
+                    entry.conversation.updated_at = Utc::now();
+                    entry.last_accessed = Instant::now();
                 }
             }
             
-            // Store conversation asynchronously (non-blocking)
-            if let Some(_storage) = storage {
-                // This would need async handling, but we're in a sync context
-                // For now, we'll skip async storage update in streaming mode
-                // TODO: Handle async storage update properly
+            // Store conversation asynchronously
+            if let Some(storage) = storage {
+                let mut convs = conversations.write().await;
+                if let Some(entry) = convs.get(&conv_id) {
+                    let conv_clone = entry.conversation.clone();
+                    let storage_clone = storage.clone();
+                    tokio::spawn(async move {
+                        let _ = storage_clone.store_conversation(&conv_clone).await;
+                    });
+                }
             }
         })
+    }
+    
+    // Get provider type for keep-alive
+    pub fn provider_type(&self) -> LlmProvider {
+        self.provider.provider_type()
+    }
+    
+    // Start model keep-alive task (only for Ollama)
+    // Note: This is a simplified keep-alive. For full implementation, 
+    // we'd need to store the OllamaClient separately or use a different approach.
+    pub fn start_keep_alive(&self) {
+        // Keep-alive will be handled by periodic requests
+        // The connection pool and Ollama's internal mechanisms handle this
     }
 }

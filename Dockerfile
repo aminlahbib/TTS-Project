@@ -48,8 +48,8 @@ RUN useradd -m -u 1000 appuser
 # Copy binary from builder
 COPY --from=builder /app/target/release/server /app/server
 
-# Copy models (consider alternatives for large models)
-COPY models ./models
+# Models are mounted as a volume at runtime (see docker-compose.yml)
+# This avoids bloating the image and allows updating models without rebuilding
 
 # Set ownership
 RUN chown -R appuser:appuser /app
