@@ -54,6 +54,12 @@
         "display_name": "Thorsten Emotional",
         "gender": "male",
         "quality": "medium"
+      },
+      "kerstin": {
+        "config": "models/de_DE/kerstin/config.onnx.json",
+        "display_name": "Kerstin",
+        "gender": "female",
+        "quality": "low"
       }
     }
   },
