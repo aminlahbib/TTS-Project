@@ -1,6 +1,6 @@
 # TTS Project
 
-High-performance multilingual Text-to-Speech and Chat platform built in Rust with Piper for speech synthesis, OpenAI/Ollama for LLM responses, and a lightweight web console for demos.
+High-performance multilingual Text-to-Speech and Chat platform built in Rust with Piper for speech synthesis, an Ollama-backed LLM pipeline, and a lightweight web console for demos.
 
 ## Highlights
 - Multilingual speech synthesis with cached Piper voices and mel-spectrogram previews
@@ -15,9 +15,9 @@ High-performance multilingual Text-to-Speech and Chat platform built in Rust wit
 | --- | --- |
 | `server/` | HTTP + WebSocket gateway, metrics, validation, rate limiting |
 | `tts_core/` | Piper bindings, voice/model management, mel/wav helpers |
-| `llm_core/` | OpenAI / Ollama clients, conversation state, Qdrant helpers |
+| `llm_core/` | Ollama client, conversation state manager, Qdrant helpers |
 | `frontend/` | Static demo console (tabs for chat, TTS, streaming, metrics) |
-| `models/` & `voiceModels/` | Example voice definitions and ONNX configs |
+| `models/` | Example voice definitions and ONNX configs |
 | `docs/` | Architecture notes, optimization logs, deployment & testing guides |
 | `scripts/` | Model checks, downloads, optimization/test harnesses |
 | `tests/` | Rust e2e suites + Postman collection + helper utilities |
@@ -36,8 +36,8 @@ docker compose up --build
 cargo run --release -p server \
   -- --config server/config.toml   # optional config file
 
-export OPENAI_API_KEY="sk-..."
-export LLM_PROVIDER="openai"       # or ollama
+export LLM_MODEL="llama3"          # override default Ollama model
+export OLLAMA_BASE_URL="http://localhost:11434"
 curl http://localhost:8085/health
 ```
 
@@ -49,16 +49,16 @@ cd frontend
 
 ## Configuration Essentials
 
-| Variable | Purpose | Default |
+| Variable | Why it matters | Default |
 | --- | --- | --- |
-| `OPENAI_API_KEY` | Required for OpenAI provider | – |
-| `LLM_PROVIDER` | `openai` or `ollama` | `openai` |
-| `LLM_MODEL` | Provider-specific model id | `gpt-3.5-turbo` |
-| `PORT` | Server port | `8085` |
-| `RATE_LIMIT_PER_MINUTE` | Global rate limit | `60` |
-| `PIPER_ESPEAKNG_DATA_DIRECTORY` | eSpeak-ng assets (auto in Docker) | `/usr/share` |
+| `LLM_MODEL` | Which Ollama model to spin up for chat/voice-chat requests | `llama3` |
+| `OLLAMA_BASE_URL` | URL of the Ollama daemon (local or remote GPU host) | `http://localhost:11434` |
+| `PORT` | HTTP + WebSocket listener for the Rust server | `8085` |
+| `RATE_LIMIT_PER_MINUTE` | Global throttle to protect synthesis + LLM workloads | `60` |
+| `PIPER_ESPEAKNG_DATA_DIRECTORY` | Ensures Piper can find eSpeak-ng phoneme data | `/usr/share` |
+| `QDRANT_URL` / `QDRANT_API_KEY` (optional) | Enables vector storage for long-lived conversations | unset |
 
-Voice mapping lives in `models/map.json`. Run `python3 scripts/check_models.py` after updating voices to verify metadata and file paths.
+Voice mapping lives in `models/map.json`; edit it when you add or rename voices. Run `python3 scripts/check_models.py` afterward to ensure every entry points to an existing ONNX bundle.
 
 ## Build, Test & QA
 - `cargo fmt && cargo clippy && cargo test` — standard Rust checks
@@ -79,13 +79,14 @@ Use `cargo clean` (or remove `target/` and `tests/target/`) before committing to
 
 ## Contributors
 - Amine (project lead & maintainer)
+- Iheb (project lead & maintainer)
 - Open-source collaborators for bug fixes, frontend polish, and QA scripts
 
 Want to contribute? Open an issue, describe the feature/bug, and link to relevant docs or benchmarks.
 
 ## Acknowledgments
 - Piper TTS, eSpeak-ng, and the broader Rhasspy ecosystem for high-quality multilingual voices
-- OpenAI and Ollama teams for reliable LLM APIs and local model tooling
+- Ollama team for reliable local LLM tooling
 - The community around Rust audio/ML crates that power low-latency inference here
 
 ## License

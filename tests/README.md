@@ -78,8 +78,8 @@ node tests/test_streaming.js "Hola" es_ES conversation-123
 
 | Variable | Why it matters | Example |
 | --- | --- | --- |
-| `OPENAI_API_KEY` | Needed when `LLM_PROVIDER=openai` during chat/e2e tests. | `sk-...` |
-| `LLM_PROVIDER` | Switches between `openai` and `ollama`. | `ollama` |
+| `LLM_MODEL` | Which Ollama model to request during tests. | `llama3` |
+| `OLLAMA_BASE_URL` | URL of the Ollama instance. | `http://localhost:11434` |
 | `LLM_MODEL` | Overrides default model per provider. | `gpt-4o-mini` |
 | `PIPER_ESPEAKNG_DATA_DIRECTORY` | Ensures Piper can find voices during synthesis tests. | `/usr/share` |
 | `QDRANT_URL` / `QDRANT_API_KEY` | Optional; required for persistence-related tests. | `http://localhost:6333` |
@@ -106,7 +106,7 @@ Helpful tips:
 ## Contributing new tests
 1. Decide on the level (unit/integration/e2e). Err on the smallest scope that catches the bug.
 2. For e2e additions, place helpers in `e2e_test_helpers.rs` so other suites can reuse them.
-3. Keep tests deterministic—mock or gate any call that depends on real OpenAI/Ollama responses when feasible.
+3. Keep tests deterministic—mock or gate any call that depends on real Ollama responses when feasible.
 4. Document new env requirements in this README and, if applicable, in the top-level `README.md`.
 
 Unit test template:
