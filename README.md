@@ -47,6 +47,62 @@ cd frontend
 ./start_frontend.sh         # or python3 serve_frontend.py
 ```
 
+## Git LFS Setup
+
+This repository uses [Git LFS](https://git-lfs.github.com/) to manage large ONNX model files (`models/**/*.onnx` and `models/**/*.onnx.json`). These files are stored in GitHub's LFS storage rather than directly in the Git repository.
+
+### First-time setup
+
+If you're cloning this repository for the first time, ensure Git LFS is installed:
+
+```bash
+# Install Git LFS (if not already installed)
+# macOS:
+brew install git-lfs
+
+# Linux (Ubuntu/Debian):
+sudo apt-get install git-lfs
+
+# Windows:
+# Download from https://git-lfs.github.com/
+
+# Initialize Git LFS in your repository
+git lfs install
+```
+
+### Cloning the repository
+
+When you clone the repository, Git LFS will automatically download the actual model files:
+
+```bash
+git clone https://github.com/aminlahbib/TTS-Project.git
+cd TTS-Project
+# Model files are automatically downloaded via Git LFS
+```
+
+If you cloned before installing Git LFS, you can download the model files manually:
+
+```bash
+git lfs install
+git lfs pull
+```
+
+### Verifying Git LFS is working
+
+Check that model files are tracked by LFS:
+
+```bash
+git lfs ls-files
+```
+
+This should list all `.onnx` and `.onnx.json` files in the `models/` directory.
+
+### Troubleshooting
+
+- **If model files appear as small text files (~130 bytes)**: Git LFS isn't installed or initialized. Run `git lfs install` and then `git lfs pull`.
+- **If you see "Git LFS not found" errors**: Install Git LFS using the commands above for your operating system.
+- **To check LFS storage usage**: Visit your repository on GitHub → Settings → Code and automation → Git LFS
+
 ## Configuration Essentials
 
 | Variable | Why it matters | Default |
