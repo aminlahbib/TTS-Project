@@ -1,325 +1,144 @@
-# Test Suite Documentation
+# Testing Guide
 
-This directory contains comprehensive tests for the TTS project.
+This folder collects everything related to automated and manual verification of the TTS Project. Use it as the single reference for how to run, extend, and triage tests.
 
-## 📁 Test Structure
+---
 
+## Directory layout
 ```
 tests/
-├── README.md                    # This file
-├── run_tests.sh                 # Test runner script
-├── test_streaming.js            # WebSocket streaming test (manual)
-└── postman/                     # Postman collection
+├── README.md                 # You're here
+├── run_tests.sh              # Unified launcher (unit/integration/e2e)
+├── e2e.rs                    # Cargo test target (uses the files below)
+├── e2e_chat_pipeline.rs      # Chat + voice-chat end-to-end specs
+├── e2e_tts_pipeline.rs       # TTS pipeline specs
+├── e2e_websocket_streaming.rs# Streaming focused specs
+├── e2e_test_helpers.rs       # Shared testing utilities
+├── test_streaming.js         # Manual WebSocket sanity check (Node)
+└── postman/
     ├── README.md
     └── TTS_API.postman_collection.json
-
-server/tests/
-├── integration.rs               # Integration test entry point
-├── common.rs                    # Integration test utilities
-├── e2e.rs                       # End-to-end test entry point
-├── e2e_tts_pipeline.rs         # E2E TTS pipeline tests
-├── e2e_chat_pipeline.rs        # E2E chat pipeline tests
-├── e2e_websocket_streaming.rs  # E2E WebSocket tests
-└── e2e_test_helpers.rs         # E2E test utilities
 ```
 
-**Note:** Unit tests are located in their respective crate modules:
-- `server/src/validation.rs` - Contains validation unit tests (9 tests passing)
-- Future tests will be added to `tts_core/src/lib.rs` and `llm_core/src/lib.rs`
+Additional integration helpers live in `server/tests/` and unit tests live alongside the Rust modules (`server/src`, `tts_core/src`, `llm_core/src`).
 
-## 📊 Test Coverage
+---
 
-### Unit Tests
+## Test types at a glance
 
-| Category | Status | Tests | Coverage |
-|----------|--------|-------|----------|
-| Validation | ✅ Passing | 9 tests | ~40% |
-| Error Handling | ✅ Passing | Included | - |
-| TTS Core | ⏳ Pending | 0 tests | 0% |
-| LLM Core | ⏳ Pending | 0 tests | 0% |
-| Qdrant Storage | ⏳ Pending | 0 tests | 0% |
+| Suite | Location | Command | Purpose / Notes |
+| --- | --- | --- | --- |
+| Unit | crate modules (`server/src`, `tts_core/src`, `llm_core/src`) | `cargo test --package <crate> --lib` | Fast logic checks (validation, helpers, error handling). |
+| Integration | `server/tests/integration.rs` | `cargo test --package server --test integration` | Spins up the HTTP stack in-process; covers REST happy-path + errors. |
+| End-to-End | `tests/e2e_*.rs` | `cargo test --package server --test e2e` | Exercises full chat + TTS pipelines, including optional audio assertions. |
+| Manual / Tools | `tests/postman`, `tests/test_streaming.js` | Postman runner / `node tests/test_streaming.js "Hello" en_US` | Useful when debugging WebSocket streaming or demoing endpoints interactively. |
 
-**Current Unit Tests:**
-- ✅ Text length validation
-- ✅ Language code validation
-- ✅ Conversation ID validation
-- ✅ Chat message validation
-- ✅ Error handling
+---
 
-### Integration Tests
+## Running tests
 
-| Category | Status | Coverage |
-|----------|--------|----------|
-| Health Check | ✅ Implemented | 100% |
-| Voice Listing | ✅ Implemented | 100% |
-| TTS Endpoint | ✅ Implemented | ~60% |
-| Chat Endpoint | ✅ Implemented | ~60% |
-| Error Responses | ✅ Implemented | 100% |
-| WebSocket | ⏳ Pending | 0% |
-| Rate Limiting | ⏳ Pending | 0% |
-| CORS | ⏳ Pending | 0% |
-
-### End-to-End Tests
-
-| Category | Status | Coverage |
-|----------|--------|----------|
-| TTS Pipeline | ✅ Implemented | ~80% |
-| Chat Pipeline | ✅ Implemented | ~70% |
-| WebSocket Streaming | ⏳ Manual Testing | 0% |
-
-**Current E2E Tests:**
-- ✅ Complete TTS pipeline (text → audio)
-- ✅ TTS with speaker selection
-- ✅ TTS with multiple languages
-- ✅ Complete chat pipeline (message → LLM → audio)
-- ✅ Chat conversation continuity
-- ✅ Chat with TTS audio generation
-- ✅ Voice chat endpoint
-
-## 🚀 Running Tests
-
-### Quick Start
-
+### Using the launcher (recommended)
 ```bash
-# Run all tests
-cargo test --workspace
-
-# Or use the test runner script
+# Run everything
 ./tests/run_tests.sh
+
+# Run a subset
+./tests/run_tests.sh unit e2e
+
+# Help text
+./tests/run_tests.sh --help
 ```
 
-### Unit Tests
-
+### Direct cargo commands
 ```bash
-# Run all unit tests (validation tests in server crate)
-cargo test --package server --lib
+# Fast unit pass across all crates
+cargo test --package tts_core --package llm_core --package server --lib
 
-# Run tests for specific package
-cargo test --package tts_core --lib
-cargo test --package llm_core --lib
-cargo test --package server --lib
-```
-
-### Integration Tests
-
-```bash
-# Run integration tests only
-cargo test --package server --test integration
-
-# Run with output
+# Integration only
 cargo test --package server --test integration -- --nocapture
-```
 
-### End-to-End Tests
-
-```bash
-# Run e2e tests only
-cargo test --package server --test e2e
-
-# Run with output
-cargo test --package server --test e2e -- --nocapture
-
-# Run specific e2e test
+# Single e2e scenario
 cargo test --package server --test e2e test_complete_tts_pipeline
 ```
 
-### Manual WebSocket Testing
-
+### Manual WebSocket poke
 ```bash
-# Test WebSocket streaming (requires running server)
-node tests/test_streaming.js "Hello, world!" en_US
-
-# Or with conversation ID
-node tests/test_streaming.js "Hello" en_US "conversation-uuid"
+node tests/test_streaming.js "Streaming test" en_US
+node tests/test_streaming.js "Hola" es_ES conversation-123
 ```
 
-### Advanced Options
+### Postman collection
+1. Import `tests/postman/TTS_API.postman_collection.json`.
+2. Set `base_url` (defaults to `http://localhost:8085`).
+3. Run folders for health, TTS, chat, or validation flows.
 
-```bash
-# Run with limited parallelism (if you encounter timeout errors)
-CARGO_BUILD_JOBS=2 cargo test --workspace
+---
 
-# Show test output
-cargo test --workspace -- --nocapture
+## Environment & dependencies
 
-# Run specific test
-cargo test test_name
+| Variable | Why it matters | Example |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | Needed when `LLM_PROVIDER=openai` during chat/e2e tests. | `sk-...` |
+| `LLM_PROVIDER` | Switches between `openai` and `ollama`. | `ollama` |
+| `LLM_MODEL` | Overrides default model per provider. | `gpt-4o-mini` |
+| `PIPER_ESPEAKNG_DATA_DIRECTORY` | Ensures Piper can find voices during synthesis tests. | `/usr/share` |
+| `QDRANT_URL` / `QDRANT_API_KEY` | Optional; required for persistence-related tests. | `http://localhost:6333` |
 
-# Run with verbose logging
-RUST_LOG=debug cargo test
+Helpful tips:
+- Keep Piper voices under `models/` and run `python3 scripts/check_models.py` before executing TTS-heavy suites.
+- For slow machines, throttle compilation with `CARGO_BUILD_JOBS=2 ./tests/run_tests.sh`.
+- Use `RUST_LOG=debug` when you need verbose server output during integration/e2e runs.
 
-# Generate coverage report (requires cargo-tarpaulin)
-cargo install cargo-tarpaulin
-cargo tarpaulin --workspace --out Html
-```
+---
 
-### Troubleshooting Build Issues
+## Current coverage snapshot
 
-If you encounter timeout errors during compilation:
+| Area | Status | Next actions |
+| --- | --- | --- |
+| Validation unit tests | ✅ solid baseline | Add edge-case regressions for new request fields. |
+| TTS core unit tests | ⚠️ missing | Add mel generation & wavewriter tests using small fixtures. |
+| LLM core unit tests | ⚠️ missing | Mock provider calls to verify retry/timeout paths. |
+| Integration (REST) | ✅ health, voices, TTS, chat | Add explicit rate-limit & CORS scenarios. |
+| WebSocket automation | ⚠️ manual only | Port `test_streaming.js` assertions into Rust-based integration test. |
 
-```bash
-# Clean and rebuild with limited parallelism
-cargo clean
-CARGO_BUILD_JOBS=2 cargo test --workspace --lib
-```
+---
 
-If you encounter package name errors:
+## Contributing new tests
+1. Decide on the level (unit/integration/e2e). Err on the smallest scope that catches the bug.
+2. For e2e additions, place helpers in `e2e_test_helpers.rs` so other suites can reuse them.
+3. Keep tests deterministic—mock or gate any call that depends on real OpenAI/Ollama responses when feasible.
+4. Document new env requirements in this README and, if applicable, in the top-level `README.md`.
 
-```bash
-# Ensure package names use underscores, not hyphens
-# Check Cargo.toml files for correct naming
-```
-
-## 📈 Current Status
-
-### ✅ Completed
-
-- **Configuration**: All configuration errors fixed (100%)
-- **Core Features**: All core features implemented (100%)
-  - ✅ Local LLM support (Ollama)
-  - ✅ Qdrant integration
-  - ✅ Conversation history
-- **Server Improvements**: All improvements complete (100%)
-  - ✅ Structured error handling
-  - ✅ Input validation
-  - ✅ Rate limiting
-  - ✅ Request logging
-  - ✅ WebSocket error handling
-  - ✅ CORS configuration
-- **TTS Core**: All improvements complete (100%)
-  - ✅ Model caching
-  - ✅ Speaker selection
-  - ✅ Sample rate from config
-- **Test Infrastructure**: Complete with documentation
-- **Unit Tests**: 9 validation tests passing
-- **Integration Tests**: API endpoint tests implemented
-
-### ⏳ Issues Still in Progress
-
-#### 1. Test Coverage Expansion
-
-**Unit Tests:**
-- [ ] TTS core functionality tests
-  - Model loading
-  - Synthesis
-  - Audio encoding
-  - Mel spectrogram generation
-- [ ] LLM core functionality tests
-  - Provider abstraction
-  - Conversation management
-  - Qdrant storage operations
-- [ ] Additional validation tests
-  - Edge cases
-  - Error scenarios
-
-**Integration Tests:**
-- [ ] WebSocket streaming tests
-- [ ] Rate limiting tests
-- [ ] CORS behavior tests
-- [ ] Error scenario tests
-- [ ] Authentication tests (if added)
-
-**End-to-End Tests:**
-- [x] Complete TTS pipeline
-- [x] Complete chat pipeline
-- [ ] WebSocket streaming (automated tests)
-- [ ] Frontend integration tests
-
-#### 2. Test Infrastructure Improvements
-
-- [ ] Test fixtures for models
-- [ ] Mock services for external dependencies
-- [ ] CI/CD integration
-- [ ] Coverage reporting automation
-
-#### 3. Known Limitations
-
-- Some tests require external services (Qdrant, Ollama)
-- Model files are large and not included in repo
-- Some tests may be slow due to model loading
-- LLM tests require API keys or local services
-
-## 🔧 Test Configuration
-
-### Environment Variables
-
-Tests use environment variables for configuration:
-
-```bash
-# LLM Tests
-export LLM_PROVIDER="openai"  # or "ollama"
-export LLM_MODEL="gpt-3.5-turbo"
-export OPENAI_API_KEY="test-key"  # For OpenAI tests
-
-# Qdrant Tests (optional)
-export QDRANT_URL="http://localhost:6333"
-export QDRANT_API_KEY=""  # Optional
-
-# Server Tests
-export PORT="8085"
-export RATE_LIMIT_PER_MINUTE="60"
-```
-
-### Test Dependencies
-
-Some tests require external services:
-
-- **Qdrant**: Optional, for conversation history tests
-- **Ollama**: Optional, for local LLM tests
-- **OpenAI API**: Required for OpenAI chat tests
-- **Model Files**: Required for TTS tests
-
-## 📝 Writing New Tests
-
-### Unit Test Example
-
+Unit test template:
 ```rust
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_function() {
-        // Arrange
-        let input = "test";
-        
-        // Act
-        let result = function(input);
-        
-        // Assert
-        assert_eq!(result, expected);
+    fn validates_language_codes() {
+        assert!(is_valid_language("en_US"));
+        assert!(!is_valid_language("klingon"));
     }
 }
 ```
 
-### Integration Test Example
-
+Tokio integration template:
 ```rust
 #[tokio::test]
-async fn test_endpoint() {
-    // Setup
+async fn rejects_empty_text() {
     let app = create_test_app().await;
-    let client = TestClient::new(app);
-    
-    // Test
-    let response = client.post("/endpoint")
-        .json(&request_body)
-        .send()
-        .await;
-    
-    // Assert
-    assert_eq!(response.status(), 200);
+    let response = send_json(&app, "/tts", json!({ "text": "" })).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 ```
 
-## 🎯 Coverage Goals
+---
 
-- **Unit Tests**: 80%+ coverage
-- **Integration Tests**: All endpoints covered
-- **E2E Tests**: Critical paths covered
+## Roadmap for the test suite
+- [ ] Automate WebSocket streaming assertions inside `cargo test`.
+- [ ] Add fixture-backed Piper snapshots so unit tests can run without heavy models.
+- [ ] Wire `./tests/run_tests.sh` into CI (GitHub Actions) with nightly coverage output.
+- [ ] Publish Postman environment + Newman command for headless API smoke tests.
 
-## 📚 Additional Resources
-
-- [Rust Testing Book](https://doc.rust-lang.org/book/ch11-00-testing.html)
-- [Axum Testing Guide](https://docs.rs/axum/latest/axum/testing/index.html)
-- [Tokio Testing](https://tokio.rs/tokio/topics/testing)
+Keep this file updated whenever test coverage or tooling changes. Feel free to add sections for new suites (load testing, fuzzing, etc.) as the project grows.
