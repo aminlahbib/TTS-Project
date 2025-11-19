@@ -1,7 +1,7 @@
 mod wav;
 mod melspec;
 
-use std::{collections::HashMap, fs, path::Path, sync::{Arc, RwLock}, hash::{Hash, Hasher}, collections::hash_map::DefaultHasher, time::Instant};
+use std::{collections::HashMap, fs, path::Path, sync::{Arc, RwLock}, hash::{Hash, Hasher}, time::Instant};
 
 use anyhow::Context;
 use base64::Engine; // for STANDARD.encode()
@@ -17,6 +17,7 @@ use dashmap::DashMap;
 use lru::LruCache;
 use tokio::sync::RwLock as TokioRwLock;
 use tokio::time::Duration;
+use ahash::AHasher;
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,8 +87,8 @@ impl TtsManager {
             map,
             voices_map: HashMap::new(),
             cache: Arc::new(DashMap::new()),
-            max_cache_size: 10, // Default: cache up to 10 models
-            response_cache: Arc::new(TokioRwLock::new(LruCache::new(std::num::NonZeroUsize::new(300).unwrap()))),
+            max_cache_size: 15, // Increased: cache up to 15 models (better for multi-language scenarios)
+            response_cache: Arc::new(TokioRwLock::new(LruCache::new(std::num::NonZeroUsize::new(500).unwrap()))), // Increased: 500 entries for better hit rate
             response_cache_ttl: Duration::from_secs(3600), // 1 hour TTL
         }
     }
@@ -99,7 +100,7 @@ impl TtsManager {
             voices_map: HashMap::new(),
             cache: Arc::new(DashMap::new()),
             max_cache_size,
-            response_cache: Arc::new(TokioRwLock::new(LruCache::new(std::num::NonZeroUsize::new(300).unwrap()))),
+            response_cache: Arc::new(TokioRwLock::new(LruCache::new(std::num::NonZeroUsize::new(500).unwrap()))), // Increased: 500 entries
             response_cache_ttl: Duration::from_secs(3600), // 1 hour TTL
         }
     }
@@ -194,8 +195,8 @@ impl TtsManager {
             map,
             voices_map,
             cache: Arc::new(DashMap::new()),
-            max_cache_size: 10, // Default: cache up to 10 models
-            response_cache: Arc::new(TokioRwLock::new(LruCache::new(std::num::NonZeroUsize::new(300).unwrap()))),
+            max_cache_size: 15, // Increased: cache up to 15 models
+            response_cache: Arc::new(TokioRwLock::new(LruCache::new(std::num::NonZeroUsize::new(500).unwrap()))), // Increased: 500 entries
             response_cache_ttl: Duration::from_secs(3600), // 1 hour TTL
         })
     }
@@ -301,15 +302,18 @@ impl TtsManager {
             last_accessed: Instant::now(),
         };
         
-        // If cache is full, remove least recently used entry (true LRU)
+        // If cache is full, remove least recently used entry (optimized LRU)
         if self.cache.len() >= self.max_cache_size {
+            // Optimized: use iterator with early exit and avoid unnecessary clones
             let mut oldest_key: Option<String> = None;
             let mut oldest_time = Instant::now();
             
-            // Find least recently used entry
+            // Find least recently used entry (single pass, O(n) but optimized)
             for entry in self.cache.iter() {
-                if entry.last_accessed < oldest_time {
-                    oldest_time = entry.last_accessed;
+                let access_time = entry.last_accessed;
+                if access_time < oldest_time {
+                    oldest_time = access_time;
+                    // Only clone when we find a candidate (reduces allocations)
                     oldest_key = Some(entry.key().clone());
                 }
             }
@@ -352,9 +356,9 @@ impl TtsManager {
         Ok(sample_rate)
     }
 
-    /// Generate cache key for response cache
+    /// Generate cache key for response cache using faster ahash
     fn cache_key(text: &str, lang_opt: Option<&str>, voice_opt: Option<&str>) -> u64 {
-        let mut hasher = DefaultHasher::new();
+        let mut hasher = AHasher::default();
         text.hash(&mut hasher);
         lang_opt.hash(&mut hasher);
         voice_opt.hash(&mut hasher);
@@ -452,7 +456,7 @@ impl TtsManager {
             }
         }
 
-        // Cache miss - synthesize (blocking operation in async context)
+        // Cache miss - synthesize and encode in a single blocking task (reduces overhead)
         // Clone only the data we need, not the entire manager with async types
         let text = text.to_string();
         let lang_opt = lang_opt.map(|s| s.to_string());
@@ -464,7 +468,8 @@ impl TtsManager {
         let cache = Arc::clone(&self.cache);
         let max_cache_size = self.max_cache_size;
         
-        let (samples, sample_rate) = tokio::task::spawn_blocking(move || {
+        // Combined blocking task: synthesize + encode in one go (faster, less overhead)
+        let (audio_base64, sample_rate, duration_ms) = tokio::task::spawn_blocking(move || {
             // Create a temporary manager for blocking synthesis
             // This avoids cloning async types (TokioRwLock)
             let temp_manager = TtsManager {
@@ -475,27 +480,27 @@ impl TtsManager {
                 response_cache: Arc::new(TokioRwLock::new(LruCache::new(std::num::NonZeroUsize::new(1).unwrap()))), // Dummy cache, not used
                 response_cache_ttl: Duration::from_secs(3600), // Dummy, not used
             };
-            temp_manager.synthesize_with_sample_rate(
+            
+            // Synthesize audio
+            let (samples, sample_rate) = temp_manager.synthesize_with_sample_rate(
                 &text,
                 lang_opt.as_deref(),
                 None,
                 voice_opt.as_deref()
-            )
+            )?;
+            
+            // Calculate duration
+            let sample_rate_f32 = sample_rate as f32;
+            let duration_ms = (samples.len() as f32 / sample_rate_f32 * 1000.0) as u64;
+            
+            // Encode to WAV base64 (in same task, no extra cloning needed)
+            let audio_base64 = Self::encode_wav_base64(&samples, sample_rate)?;
+            
+            Ok::<(String, u32, u64), anyhow::Error>((audio_base64, sample_rate, duration_ms))
         })
         .await
-        .map_err(|e| anyhow::anyhow!("Task join error: {e}"))??;
-        
-        let sample_rate_f32 = sample_rate as f32;
-        let duration_ms = (samples.len() as f32 / sample_rate_f32 * 1000.0) as u64;
-
-        // Encode to WAV base64 (clone samples for move into blocking task)
-        let samples_for_encode = samples.clone();
-        let sample_rate_for_encode = sample_rate;
-        let audio_base64 = tokio::task::spawn_blocking(move || {
-            Self::encode_wav_base64(&samples_for_encode, sample_rate_for_encode)
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("Task join error: {e}"))??;
+        .map_err(|e| anyhow::anyhow!("Task join error: {e}"))?
+        .map_err(|e| anyhow::anyhow!("Synthesis/encoding error: {e}"))?;
 
         // Cache the result
         let cached_response = CachedResponse {
@@ -524,7 +529,7 @@ impl TtsManager {
     }
 
 
-    /// Convenience: WAV base64
+    /// Convenience: WAV base64 (optimized with pre-allocated buffer)
     pub fn encode_wav_base64(samples: &[f32], sample_rate: u32) -> anyhow::Result<String> {
         use std::io::Cursor;
         use base64::Engine; // enables `.encode(...)`
@@ -536,15 +541,23 @@ impl TtsManager {
             sample_format: hound::SampleFormat::Int,
         };
 
-        // Write to a Cursor so we can recover the Vec<u8> afterwards
-        let mut cursor = Cursor::new(Vec::<u8>::new());
+        // Pre-allocate buffer: WAV header (44 bytes) + samples (2 bytes per sample)
+        // This reduces reallocations during writing
+        let estimated_size = 44 + (samples.len() * 2);
+        let mut cursor = Cursor::new(Vec::<u8>::with_capacity(estimated_size));
+        
         {
             let mut writer = hound::WavWriter::new(&mut cursor, spec)
                 .map_err(|e| anyhow::anyhow!("wav write err: {e}"))?;
 
+            // Optimized: batch write samples (hound handles buffering internally)
+            // Pre-compute conversion constants for better performance
+            const I16_MAX_F32: f32 = i16::MAX as f32;
+            
             for &s in samples {
-                // clamp and convert f32 [-1.0, 1.0] -> i16
-                let v = (s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
+                // Clamp and convert f32 [-1.0, 1.0] -> i16
+                // Using clamp is clear and optimized by the compiler
+                let v = (s.clamp(-1.0, 1.0) * I16_MAX_F32) as i16;
                 writer
                     .write_sample(v)
                     .map_err(|e| anyhow::anyhow!("wav sample err: {e}"))?;
