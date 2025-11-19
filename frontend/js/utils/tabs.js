@@ -5,7 +5,6 @@
  */
 export const tabConfig = {
     tts: { title: 'Text-to-Speech', desc: 'Convert text to natural-sounding speech', file: 'tabs/tts.html' },
-    stream: { title: 'Real-time Streaming', desc: 'Stream audio in real-time', file: 'tabs/stream.html' },
     chat: { title: 'AI Chat', desc: 'Chat with AI assistant', file: 'tabs/chat.html' },
     'voice-chat': { title: 'Voice Mode', desc: 'Real-time voice conversation', file: 'tabs/voice-chat.html' },
     server: { title: 'Server Information', desc: 'Server status and configuration', file: 'tabs/server.html' }
@@ -110,7 +109,9 @@ export async function setupTabs(onTabChange = null) {
     const initialContent = tabContentContainer.querySelector(`.tab-content[data-tab="${initialTab}"]`);
     if (initialContent) {
         initialContent.classList.add('active');
-        }
+        // Note: Don't call onTabChange here - it will be called after voices are loaded
+        // This prevents initializing the tab before voices are available
+    }
     
     // Setup tab button click handlers
     tabButtons.forEach(button => {
@@ -150,7 +151,12 @@ export async function setupTabs(onTabChange = null) {
                 
                 // Call tab change callback
                 if (onTabChange) {
-                    onTabChange(targetTab, targetContent);
+                    await onTabChange(targetTab, targetContent);
+                }
+                
+                // Update LLM provider visibility (if function exists)
+                if (typeof window.updateLlmProviderVisibility === 'function') {
+                    window.updateLlmProviderVisibility(targetTab);
                 }
             }
         });

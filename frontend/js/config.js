@@ -117,21 +117,11 @@ export const CONFIG = {
     get API_BASE() { return getApiBaseLazy(); },
     get WS_BASE() { return getWebSocketBaseLazy(); },
     
-    // Streaming Configuration
-    STREAMING: {
-        MAX_AUDIO_SAMPLES: 10_000_000, // ~7.5 minutes at 22kHz (safety limit)
-        MAX_MEL_FRAMES: 50000, // Limit mel frames accumulation
-        RECONNECT_ATTEMPTS: 3,
-        RECONNECT_DELAY: 1000, // ms
-        DEFAULT_SAMPLE_RATE: 22050,
-        FRAME_WIDTH: 2, // pixels per frame in spectrogram
-    },
-    
     // VAD Configuration
     VAD: {
         ENABLED: true,
         SILENCE_THRESHOLD: 30, // Audio level threshold (0-255)
-        SILENCE_DURATION: 1500, // Milliseconds of silence before auto-stop
+        SILENCE_DURATION: 1500, // Milliseconds of silence before auto-send (ms)
         CHECK_INTERVAL: 100, // How often to check audio levels (ms)
         MIN_RECORDING_DURATION: 500, // Minimum recording duration before VAD can trigger (ms)
     },
@@ -169,7 +159,8 @@ export const LANGUAGE_NAMES = {
     'es_ES': 'Spanish (Spain)',
     'it_IT': 'Italian (Italy)',
     'pt_PT': 'Portuguese (Portugal)',
-    'nl_NL': 'Dutch (Netherlands)'
+    'nl_NL': 'Dutch (Netherlands)',
+    'uk_UA': 'Ukrainian (Ukraine)'
 };
 
 export const TTS_TO_SPEECH_LANG = {
@@ -180,5 +171,6 @@ export const TTS_TO_SPEECH_LANG = {
     'es_ES': 'es-ES',
     'it_IT': 'it-IT',
     'pt_PT': 'pt-PT',
-    'nl_NL': 'nl-NL'
+    'nl_NL': 'nl-NL',
+    'uk_UA': 'uk-UA'
 };

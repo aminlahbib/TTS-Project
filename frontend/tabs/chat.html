@@ -35,15 +35,6 @@
     <form id="chatForm" class="chat-form">
         <!-- Text Input Mode -->
         <div class="chat-form-input-wrapper" id="textInputWrapper">
-            <button type="button" class="btn-icon chat-voice-toggle-btn" id="voiceModeToggleBtn" aria-label="Use dictating mode" title="Use dictating mode">
-                <svg class="voice-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                    <line x1="12" y1="19" x2="12" y2="23"></line>
-                    <line x1="8" y1="23" x2="16" y2="23"></line>
-                </svg>
-            </button>
-            
             <!-- Templates for voice toggle button states -->
             <template id="voiceToggleMicTemplate">
                 <svg class="voice-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -66,19 +57,31 @@
             <template id="recordingIndicatorTemplate">
                 <span class="recording-indicator">●</span>
             </template>
+            
+            <button type="button" class="btn-icon chat-voice-toggle-btn" id="voiceModeToggleBtn" aria-label="Use dictating mode" title="Use dictating mode">
+                <svg class="voice-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                    <line x1="12" y1="19" x2="12" y2="23"></line>
+                    <line x1="8" y1="23" x2="16" y2="23"></line>
+                </svg>
+            </button>
+            
             <div class="chat-input-container">
-                <input
-                        type="text"
+                <textarea
                         id="chatInput"
                         name="message"
                         placeholder="Type your message..."
                         required
                         autocomplete="off"
+                        rows="1"
                         maxlength="2000"
-                >
+                ></textarea>
+                <div class="chat-char-count"><span id="chatCharCount">0</span> / 2000</div>
                 <!-- Compact spectrogram inside input when recording -->
                 <canvas id="voiceInputSpectrogram" class="voice-input-spectrogram hidden"></canvas>
             </div>
+            
             <button type="button" class="btn-icon" id="useVoiceModeBtn" title="Use Voice Mode" aria-label="Use Voice Mode">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
                     <!-- Headset icon -->
@@ -115,11 +118,12 @@
             </div>
             <div class="voice-mode-status-compact" id="voiceModeStatusCompact" role="status" aria-live="polite">
                 <span class="voice-mode-status-text">Click microphone to start recording</span>
-                <span class="voice-mode-vad-hint">Auto-stop after 1.5s silence</span>
+                <span class="voice-mode-vad-hint">Auto-send after 1.5s silence</span>
             </div>
         </div>
         
-        <div id="chatStatus" class="status-container"></div>
+        <!-- Status indicator above form (floating) -->
+        <div id="chatStatus" class="chat-status-indicator"></div>
     </form>
 </section>
 

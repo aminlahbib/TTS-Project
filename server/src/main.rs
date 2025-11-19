@@ -1,11 +1,7 @@
-pub mod error;
-pub mod validation;
-pub mod config;
-
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
-    extract::{Path, Request, State, WebSocketUpgrade},
+    extract::{Request, State, WebSocketUpgrade},
     middleware::Next,
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -21,18 +17,25 @@ use tracing::{error, info, warn};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use llm_core::{LlmClient, LlmProvider};
-use futures_util::SinkExt;
+
+mod error;
+mod validation;
+mod config;
+mod metrics;
 
 use crate::error::ApiError;
 use crate::validation::{validate_chat_request, validate_conversation_id, validate_tts_request};
 use crate::config::ServerConfig;
+use crate::metrics::AppMetrics;
 
 #[derive(Clone)]
 pub struct AppState {
     pub tts: Arc<tts_core::TtsManager>,
-    pub llm: Arc<std::sync::Mutex<LlmClient>>,
+    pub llm: Arc<LlmClient>, // No mutex needed - client is async and thread-safe
     pub request_count: Arc<AtomicU64>,
     pub config: ServerConfig,
+    pub metrics: AppMetrics,
+    pub llm_provider: LlmProvider, // Store the provider type for API queries
 }
 
 #[derive(Deserialize)]
@@ -40,6 +43,7 @@ pub struct TtsRequest {
     text: String,
     language: Option<String>,
     speaker: Option<i64>,
+    voice: Option<String>, // voice ID (e.g., "norman", "thorsten")
 }
 
 #[derive(Serialize)]
@@ -54,6 +58,12 @@ pub struct VoiceInfo {
     key: String,
     config: String,
     speaker: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gender: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quality: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -89,28 +99,25 @@ async fn main() -> anyhow::Result<()> {
 async fn async_main() -> anyhow::Result<()> {
     info!("Starting TTS/LLM server...");
 
-    let provider_env = std::env::var("LLM_PROVIDER").unwrap_or_else(|_| "openai".into());
-    let provider = match provider_env.as_str() {
-        "ollama" => LlmProvider::Ollama,
-        _ => LlmProvider::OpenAI,
-    };
-    let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| match provider {
-        LlmProvider::OpenAI => "gpt-3.5-turbo".into(),
-        LlmProvider::Ollama => "llama2".into(),
-    });
+    // Always use Ollama as the LLM provider
+    let provider = LlmProvider::Ollama;
+    let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| "llama3".into());
 
     let llm = if let Ok(url) = std::env::var("QDRANT_URL") {
         if !url.trim().is_empty() {
             info!("Initializing LLM with Qdrant at {}", url);
-            Arc::new(std::sync::Mutex::new(LlmClient::with_storage(provider, &model, None).await?))
+            Arc::new(LlmClient::with_storage(provider.clone(), &model, None).await?)
         } else {
             info!("QDRANT_URL empty, using LLM without storage");
-            Arc::new(std::sync::Mutex::new(LlmClient::new(provider, &model)?))
+            Arc::new(LlmClient::new(provider.clone(), &model).await?)
         }
     } else {
         info!("No QDRANT_URL set, using LLM without storage");
-        Arc::new(std::sync::Mutex::new(LlmClient::new(provider, &model)?))
+        Arc::new(LlmClient::new(provider.clone(), &model).await?)
     };
+    
+    // Start model keep-alive (if needed)
+    llm.start_keep_alive();
 
     info!("Loading TTS models...");
     let tts = Arc::new(
@@ -121,6 +128,14 @@ async fn async_main() -> anyhow::Result<()> {
             }),
     );
     info!("Loaded {} TTS voices", tts.list_languages().len());
+    
+    // Preload frequently used models (en_US, de_DE)
+    info!("Preloading frequently used TTS models...");
+    if let Err(e) = tts.preload_models(&["en_US", "de_DE"]) {
+        warn!("Failed to preload some TTS models: {e}");
+    } else {
+        info!("TTS models preloaded successfully");
+    }
 
     // Initialize start time for uptime calculation
     let _ = START_TIME.get_or_init(|| std::time::Instant::now());
@@ -133,6 +148,8 @@ async fn async_main() -> anyhow::Result<()> {
         llm,
         request_count: Arc::new(AtomicU64::new(0)),
         config: config.clone(),
+        metrics: AppMetrics::new(),
+        llm_provider: provider.clone(), // Store provider type
     };
     info!("Server configuration loaded: port={}, rate_limit={}/min, llm_timeout={}s", 
         config.port, config.rate_limit_per_minute, config.llm_timeout_secs);
@@ -214,17 +231,18 @@ async fn async_main() -> anyhow::Result<()> {
     let public_api = Router::new()
         .route("/health", get(health_check))
         .route("/healthz", get(health_check))
+        .route("/llm/provider", get(llm_provider_endpoint))
         .route("/voices", get(list_voices))
         .route("/voices/detail", get(list_voices_detail))
         .route("/tts", post(tts_endpoint))
         .route("/chat", post(chat_endpoint))
         .route("/voice-chat", post(voice_chat_endpoint))
-        .route("/stream/{lang}/{text}", get(stream_ws))
         .route("/ws/chat/stream", get(chat_stream_ws));
     
-    // Metrics endpoint - consider adding authentication in production
+    // Metrics endpoints - consider adding authentication in production
     let metrics_api = Router::new()
-        .route("/metrics", get(metrics_endpoint));
+        .route("/metrics", get(metrics_endpoint))
+        .route("/metrics/detailed", get(detailed_metrics_endpoint));
     
     let api = Router::new()
         .merge(public_api)
@@ -250,6 +268,21 @@ async fn async_main() -> anyhow::Result<()> {
 
 pub async fn health_check() -> &'static str {
     "ok"
+}
+
+#[derive(Serialize)]
+pub struct LlmProviderResponse {
+    pub provider: String,
+    pub model: String,
+}
+
+pub async fn llm_provider_endpoint(_state: State<AppState>) -> Json<LlmProviderResponse> {
+    let provider_str = "ollama";
+    let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| "llama3".into());
+    Json(LlmProviderResponse {
+        provider: provider_str.to_string(),
+        model,
+    })
 }
 
 #[derive(Serialize)]
@@ -317,19 +350,142 @@ pub async fn metrics_endpoint(State(state): State<AppState>) -> Json<MetricsResp
     })
 }
 
+/// Enhanced metrics endpoint with detailed per-endpoint and component metrics
+pub async fn detailed_metrics_endpoint(State(state): State<AppState>) -> Json<crate::metrics::DetailedMetricsResponse> {
+    use crate::metrics::{DetailedMetricsResponse, SystemMetrics, EndpointMetricsResponse, EndpointStats, TtsMetricsResponse, LlmMetricsResponse};
+    use chrono::Utc;
+    
+    let mut system = sysinfo::System::new();
+    system.refresh_cpu();
+    system.refresh_memory();
+    
+    let cpu_usage = system.global_cpu_info().cpu_usage();
+    let memory_used = system.used_memory();
+    let memory_total = system.total_memory();
+    let memory_usage_percent = if memory_total > 0 {
+        (memory_used as f64 / memory_total as f64 * 100.0) as f32
+    } else {
+        0.0
+    };
+    
+    let uptime = START_TIME.get()
+        .map(|start| start.elapsed().as_secs())
+        .unwrap_or(0);
+    
+    let system_load = {
+        #[cfg(unix)]
+        {
+            use std::fs;
+            if let Ok(loadavg) = fs::read_to_string("/proc/loadavg") {
+                loadavg.split_whitespace().next()
+                    .and_then(|s| s.parse::<f64>().ok())
+            } else {
+                None
+            }
+        }
+        #[cfg(not(unix))]
+        None
+    };
+    
+    Json(DetailedMetricsResponse {
+        timestamp: Utc::now(),
+        system: SystemMetrics {
+            cpu_usage_percent: cpu_usage,
+            memory_used_mb: memory_used / 1024 / 1024,
+            memory_total_mb: memory_total / 1024 / 1024,
+            memory_usage_percent,
+            request_count: state.request_count.load(Ordering::Relaxed),
+            uptime_seconds: uptime,
+            system_load,
+        },
+        endpoints: EndpointMetricsResponse {
+            tts: EndpointStats {
+                request_count: state.metrics.tts.request_count.load(Ordering::Relaxed),
+                error_count: state.metrics.tts.error_count.load(Ordering::Relaxed),
+                avg_latency_ms: state.metrics.tts.avg_latency_ms(),
+                min_latency_ms: state.metrics.tts.min_latency_ms.load(Ordering::Relaxed),
+                max_latency_ms: state.metrics.tts.max_latency_ms.load(Ordering::Relaxed),
+                p50_latency_ms: state.metrics.tts.p50_latency_ms(),
+                p95_latency_ms: state.metrics.tts.p95_latency_ms(),
+                p99_latency_ms: state.metrics.tts.p99_latency_ms(),
+            },
+            chat: EndpointStats {
+                request_count: state.metrics.chat.request_count.load(Ordering::Relaxed),
+                error_count: state.metrics.chat.error_count.load(Ordering::Relaxed),
+                avg_latency_ms: state.metrics.chat.avg_latency_ms(),
+                min_latency_ms: state.metrics.chat.min_latency_ms.load(Ordering::Relaxed),
+                max_latency_ms: state.metrics.chat.max_latency_ms.load(Ordering::Relaxed),
+                p50_latency_ms: state.metrics.chat.p50_latency_ms(),
+                p95_latency_ms: state.metrics.chat.p95_latency_ms(),
+                p99_latency_ms: state.metrics.chat.p99_latency_ms(),
+            },
+            voice_chat: EndpointStats {
+                request_count: state.metrics.voice_chat.request_count.load(Ordering::Relaxed),
+                error_count: state.metrics.voice_chat.error_count.load(Ordering::Relaxed),
+                avg_latency_ms: state.metrics.voice_chat.avg_latency_ms(),
+                min_latency_ms: state.metrics.voice_chat.min_latency_ms.load(Ordering::Relaxed),
+                max_latency_ms: state.metrics.voice_chat.max_latency_ms.load(Ordering::Relaxed),
+                p50_latency_ms: state.metrics.voice_chat.p50_latency_ms(),
+                p95_latency_ms: state.metrics.voice_chat.p95_latency_ms(),
+                p99_latency_ms: state.metrics.voice_chat.p99_latency_ms(),
+            },
+        },
+        tts: TtsMetricsResponse {
+            synthesis_count: state.metrics.tts_specific.synthesis_count.load(Ordering::Relaxed),
+            avg_synthesis_time_ms: state.metrics.tts_specific.avg_synthesis_time_ms(),
+            cache_hits: state.metrics.tts_specific.cache_hits.load(Ordering::Relaxed),
+            cache_misses: state.metrics.tts_specific.cache_misses.load(Ordering::Relaxed),
+            cache_hit_rate: state.metrics.tts_specific.cache_hit_rate(),
+            total_samples: state.metrics.tts_specific.total_samples.load(Ordering::Relaxed),
+        },
+        llm: LlmMetricsResponse {
+            request_count: state.metrics.llm_specific.request_count.load(Ordering::Relaxed),
+            total_tokens: state.metrics.llm_specific.total_tokens.load(Ordering::Relaxed),
+            avg_tokens_per_request: state.metrics.llm_specific.avg_tokens_per_request(),
+            avg_response_time_ms: state.metrics.llm_specific.avg_response_time_ms(),
+            error_count: state.metrics.llm_specific.error_count.load(Ordering::Relaxed),
+            timeout_count: state.metrics.llm_specific.timeout_count.load(Ordering::Relaxed),
+        },
+    })
+}
+
 pub async fn list_voices(State(state): State<AppState>) -> Json<Vec<String>> {
     Json(state.tts.list_languages())
 }
 
 pub async fn list_voices_detail(State(state): State<AppState>) -> Json<Vec<VoiceInfo>> {
     let mut out = Vec::new();
-    for (k, (cfg, spk)) in state.tts.map_iter() {
-        out.push(VoiceInfo {
-            key: k.clone(),
-            config: cfg.clone(),
-            speaker: *spk,
-        });
+    
+    // Add voices from new format (multiple voices per language)
+    for lang in state.tts.list_languages() {
+        let voices = state.tts.list_voices_for_language(&lang);
+        for (voice_id, voice_entry) in voices {
+            out.push(VoiceInfo {
+                key: format!("{}:{}", lang, voice_id),
+                config: voice_entry.config.clone(),
+                speaker: voice_entry.speaker_id,
+                display_name: voice_entry.display_name.clone(),
+                gender: voice_entry.gender.clone(),
+                quality: voice_entry.quality.clone(),
+            });
+        }
     }
+    
+    // Add legacy format voices (for backwards compatibility)
+    for (k, (cfg, spk)) in state.tts.map_iter() {
+        // Skip if already added from new format
+        if !out.iter().any(|v| v.key.starts_with(&format!("{}:", k))) {
+            out.push(VoiceInfo {
+                key: k.clone(),
+                config: cfg.clone(),
+                speaker: *spk,
+                display_name: None,
+                gender: None,
+                quality: None,
+            });
+        }
+    }
+    
     Json(out)
 }
 
@@ -338,19 +494,34 @@ pub async fn tts_endpoint(
     Json(req): Json<TtsRequest>,
 ) -> Result<Json<TtsResponse>, ApiError> {
     state.request_count.fetch_add(1, Ordering::Relaxed);
+    let start_time = std::time::Instant::now();
     validate_tts_request(&req.text, req.language.as_deref())?;
 
-    let (samples, sample_rate) = state
-        .tts
-        .synthesize_with_sample_rate(&req.text, req.language.as_deref(), req.speaker)
-        .map_err(ApiError::TtsError)?;
+    let tts = state.tts.clone();
+    // Clean text for natural TTS speech with pauses and prosody
+    let text = clean_text_for_tts(&req.text);
+    let language = req.language.clone();
+    let voice = req.voice.clone();
+    
+    // Use new async caching method
+    let tts_start = std::time::Instant::now();
+    let (audio_base64, sample_rate, duration_ms, cache_hit) = tts
+        .synthesize_with_cache(&text, language.as_deref(), voice.as_deref())
+        .await
+        .map_err(|e| {
+            state.metrics.tts.record_error();
+            ApiError::TtsError(e)
+        })?;
 
-    let sample_rate_f32 = sample_rate as f32;
-
-    let audio_base64 = tts_core::TtsManager::encode_wav_base64(&samples, sample_rate)
-        .map_err(|e| ApiError::TtsError(anyhow::anyhow!("WAV encoding error: {e}")))?;
-
-    let duration_ms = (samples.len() as f32 / sample_rate_f32 * 1000.0) as u64;
+    let tts_time_ms = tts_start.elapsed().as_millis() as u64;
+    let latency_ms = start_time.elapsed().as_millis() as u64;
+    
+    // Record metrics with cache hit tracking
+    state.metrics.tts.record_request(latency_ms);
+    state.metrics.tts_specific.record_synthesis(tts_time_ms, 0, cache_hit); // samples not needed for cached responses
+    
+    info!("TTS request completed in {}ms (synthesis: {}ms), duration: {}ms, cache_hit: {}", 
+          latency_ms, tts_time_ms, duration_ms, cache_hit);
 
     Ok(Json(TtsResponse {
         audio_base64,
@@ -378,41 +549,26 @@ pub async fn chat_endpoint(
 
     info!("Chat request received: message length={}, conv_id={:?}", message.len(), conv_id);
 
-    // Run LLM in blocking task with timeout
-    // Using spawn_blocking to avoid blocking the async runtime
+    // Run LLM async with timeout (no blocking needed - fully async now)
+    let conv_id = conv_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let result = tokio::time::timeout(
         state.config.llm_timeout(),
-        tokio::task::spawn_blocking({
-            let llm = llm.clone();
-            let message = message.clone();
-            let conv_id = conv_id.clone();
-            move || {
-                let llm = llm.lock().unwrap_or_else(|poisoned| {
-                    error!("LLM mutex poisoned in chat_endpoint, recovering: {}", poisoned);
-                    poisoned.into_inner()
-                });
-                let conv_id = conv_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                match llm.chat_with_history(Some(conv_id.clone()), &message) {
-                    Ok(reply) => Ok::<_, ApiError>((reply, conv_id)),
-                    Err(e) => Err(ApiError::LlmError(format!("LLM error: {e}"))),
-                }
-            }
-        })
+        llm.chat_with_history(Some(conv_id.clone()), &message)
     )
     .await;
 
-    let (reply, conv_id) = match result {
-        Ok(Ok(Ok((reply, conv_id)))) => (reply, conv_id),
-        Ok(Ok(Err(join_err))) => {
-            error!("Join error in chat task: {join_err}");
-            return Err(ApiError::InternalError(format!("Join error: {join_err}")));
-        }
-        Ok(Err(join_err)) => {
-            error!("Task join error: {join_err}");
-            return Err(ApiError::InternalError(format!("Task join error: {join_err}")));
+    let reply = match result {
+        Ok(Ok(reply)) => reply,
+        Ok(Err(e)) => {
+            state.metrics.chat.record_error();
+            state.metrics.llm_specific.record_error();
+            error!("LLM error: {}", e);
+            return Err(ApiError::LlmError(format!("LLM error: {e}")));
         }
         Err(_) => {
             let timeout_secs = state.config.llm_timeout().as_secs();
+            state.metrics.chat.record_error();
+            state.metrics.llm_specific.record_timeout();
             error!("LLM request timed out after {} seconds", timeout_secs);
             return Err(ApiError::LlmError(format!(
                 "Request timed out after {} seconds. Please try again with a shorter message.",
@@ -421,8 +577,13 @@ pub async fn chat_endpoint(
         }
     };
 
-    let llm_time = start_time.elapsed();
-    info!("LLM response received in {:.2}s, reply length={}", llm_time.as_secs_f64(), reply.len());
+    let total_latency_ms = start_time.elapsed().as_millis() as u64;
+    
+    // Record metrics
+    state.metrics.chat.record_request(total_latency_ms);
+    state.metrics.llm_specific.record_request(total_latency_ms, reply.len());
+    
+    info!("LLM response received in {:.2}s, reply length={}", total_latency_ms as f64 / 1000.0, reply.len());
 
     // Return text immediately - TTS generation moved to background for speed
     // This ensures response time is only limited by LLM, not TTS
@@ -437,10 +598,11 @@ pub async fn chat_endpoint(
     // Generate TTS in background (completely non-blocking)
     if let Some(lang) = language {
         let tts_state = state.tts.clone();
-        let reply_for_tts = reply;
+        // Clean text for natural TTS speech with pauses and prosody
+        let reply_for_tts = clean_text_for_tts(&reply);
         tokio::spawn(async move {
             let _ = tokio::task::spawn_blocking(move || {
-                if let Ok((samples, sr)) = tts_state.synthesize_with_sample_rate(&reply_for_tts, Some(&lang), None) {
+                if let Ok((samples, sr)) = tts_state.synthesize_with_sample_rate(&reply_for_tts, Some(&lang), None, None) {
                     let _ = tts_core::TtsManager::encode_wav_base64(&samples, sr);
                     // Audio generated in background - frontend can request via /tts if needed
                 }
@@ -456,6 +618,7 @@ pub struct VoiceChatRequest {
     message: String,
     conversation_id: Option<String>,
     language: Option<String>,
+    voice: Option<String>, // voice ID (e.g., "norman", "thorsten")
 }
 
 #[derive(Serialize)]
@@ -473,6 +636,7 @@ pub async fn voice_chat_endpoint(
     Json(req): Json<VoiceChatRequest>,
 ) -> Result<Json<VoiceChatResponse>, ApiError> {
     state.request_count.fetch_add(1, Ordering::Relaxed);
+    let start_time = std::time::Instant::now();
     validate_chat_request(&req.message)?;
     if let Some(ref id) = req.conversation_id {
         validate_conversation_id(id)?;
@@ -489,41 +653,26 @@ pub async fn voice_chat_endpoint(
     };
     let language = req.language.clone().unwrap_or_else(|| default_lang.to_string());
 
-    // Get LLM response with timeout
-    // Using spawn_blocking to avoid blocking the async runtime
+    // Get LLM response with timeout (fully async now)
+    let conv_id = conv_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let result = tokio::time::timeout(
         state.config.llm_timeout(),
-        tokio::task::spawn_blocking({
-            let llm = llm.clone();
-            let message = message.clone();
-            let conv_id = conv_id.clone();
-            move || {
-                let llm = llm.lock().unwrap_or_else(|poisoned| {
-                    error!("LLM mutex poisoned in voice_chat_endpoint, recovering: {}", poisoned);
-                    poisoned.into_inner()
-                });
-                let conv_id = conv_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                match llm.chat_with_history(Some(conv_id.clone()), &message) {
-                    Ok(reply) => Ok::<_, ApiError>((reply, conv_id)),
-                    Err(e) => Err(ApiError::LlmError(format!("LLM error: {e}"))),
-                }
-            }
-        })
+        llm.chat_with_history(Some(conv_id.clone()), &message)
     )
     .await;
 
-    let (reply, conv_id) = match result {
-        Ok(Ok(Ok((reply, conv_id)))) => (reply, conv_id),
-        Ok(Ok(Err(join_err))) => {
-            error!("Join error in voice chat task: {join_err}");
-            return Err(ApiError::InternalError(format!("Join error: {join_err}")));
-        }
-        Ok(Err(join_err)) => {
-            error!("Task join error: {join_err}");
-            return Err(ApiError::InternalError(format!("Task join error: {join_err}")));
+    let reply = match result {
+        Ok(Ok(reply)) => reply,
+        Ok(Err(e)) => {
+            state.metrics.voice_chat.record_error();
+            state.metrics.llm_specific.record_error();
+            error!("LLM error: {}", e);
+            return Err(ApiError::LlmError(format!("LLM error: {e}")));
         }
         Err(_) => {
             let timeout_secs = state.config.llm_timeout().as_secs();
+            state.metrics.voice_chat.record_error();
+            state.metrics.llm_specific.record_timeout();
             error!("LLM request timed out after {} seconds", timeout_secs);
             return Err(ApiError::LlmError(format!(
                 "Request timed out after {} seconds. Please try again with a shorter message.",
@@ -535,17 +684,30 @@ pub async fn voice_chat_endpoint(
     // Clean text for natural TTS speech
     let cleaned_reply = clean_text_for_tts(&reply);
     
-    // Generate TTS audio (required for voice chat)
-    let (samples, sample_rate) = state
-        .tts
-        .synthesize_with_sample_rate(&cleaned_reply, Some(&language), None)
-        .map_err(ApiError::TtsError)?;
+    // Generate TTS audio (required for voice chat) - use caching
+    let voice_id = req.voice.as_deref();
+    let tts = state.tts.clone();
+    
+    let tts_start = std::time::Instant::now();
+    let (audio_base64, sample_rate, duration_ms, cache_hit) = tts
+        .synthesize_with_cache(
+            &cleaned_reply,
+            Some(&language),
+            voice_id
+        )
+        .await
+        .map_err(|e| {
+            state.metrics.voice_chat.record_error();
+            ApiError::TtsError(e)
+        })?;
 
-    let sample_rate_f32 = sample_rate as f32;
-    let duration_ms = (samples.len() as f32 / sample_rate_f32 * 1000.0) as u64;
-
-    let audio_base64 = tts_core::TtsManager::encode_wav_base64(&samples, sample_rate)
-        .map_err(|e| ApiError::TtsError(anyhow::anyhow!("WAV encoding error: {e}")))?;
+    let tts_time_ms = tts_start.elapsed().as_millis() as u64;
+    let total_latency_ms = start_time.elapsed().as_millis() as u64;
+    
+    // Record metrics with cache hit tracking
+    state.metrics.voice_chat.record_request(total_latency_ms);
+    state.metrics.llm_specific.record_request(total_latency_ms, reply.len());
+    state.metrics.tts_specific.record_synthesis(tts_time_ms, 0, cache_hit); // samples not needed for cached responses
 
     Ok(Json(VoiceChatResponse {
         audio_base64,
@@ -555,295 +717,6 @@ pub async fn voice_chat_endpoint(
         reply: reply.clone(),
         cleaned_text: cleaned_reply,
     }))
-}
-
-pub async fn stream_ws(
-    ws: WebSocketUpgrade,
-    State(state): State<AppState>,
-    Path((lang, text)): Path<(String, String)>,
-) -> impl IntoResponse {
-    if let Err(e) = validate_tts_request(&text, Some(&lang)) {
-        return ws.on_upgrade(move |mut socket| async move {
-            use axum::extract::ws::Message;
-            let error_msg = serde_json::json!({ "error": format!("{e}"), "code": 400 });
-            let _ = socket.send(Message::Text(error_msg.to_string().into())).await;
-        });
-    }
-
-    ws.on_upgrade(move |mut socket| async move {
-        use axum::extract::ws::Message;
-        
-        // Send synthesizing status
-        let _ = socket.send(Message::Text(
-            serde_json::json!({ 
-                "type": "status", 
-                "status": "synthesizing", 
-                "message": "Generating audio..." 
-            }).to_string().into()
-        )).await;
-        
-        // Get sample rate first
-        let sample_rate = match state.tts.config_for(Some(&lang)) {
-            Ok((cfg_path, _)) => state.tts.get_sample_rate(&cfg_path).unwrap_or(22050) as f32,
-            Err(_) => 22_050.0f32,
-        };
-
-        let frame_size = 1024usize;
-        let hop_size = 256usize;
-        let n_mels = 80usize;
-        
-        // Get config path
-        let (cfg_path, _) = match state.tts.config_for(Some(&lang)) {
-            Ok(cfg) => cfg,
-            Err(e) => {
-                let err_msg = serde_json::json!({ "error": format!("Config error: {e}"), "code": 500 });
-                let _ = socket.send(Message::Text(err_msg.to_string().into())).await;
-                let _ = socket.close().await;
-                return;
-            }
-        };
-        
-        // Create channel for streaming chunks in real-time
-        let (tx, mut rx) = mpsc::channel::<Result<Vec<f32>, String>>(100);
-        
-        // Use spawn_blocking to run synthesis in a separate thread
-        // Stream chunks as they're generated from the iterator
-        let tts_state = state.tts.clone();
-        let text_clone = text.clone();
-        let cfg_path_clone = cfg_path.clone();
-        
-        // Move tx into the blocking task - when task completes, channel will close
-        let synthesis_task = tokio::task::spawn_blocking(move || {
-            // Get synthesizer
-            let (synth_arc, _) = match tts_state.get_or_create_synth(&cfg_path_clone) {
-                Ok(s) => s,
-                Err(e) => {
-                    let _ = tx.blocking_send(Err(format!("TTS error: {e}")));
-                    return;
-                }
-            };
-            
-            let synth = synth_arc.lock().unwrap_or_else(|poisoned| {
-                error!("TTS synthesizer mutex poisoned, recovering: {}", poisoned);
-                poisoned.into_inner()
-            });
-            
-            // Create iterator and stream chunks as they come
-            let iter = match synth.synthesize_parallel(text_clone, None) {
-                Ok(i) => i,
-                Err(e) => {
-                    let _ = tx.blocking_send(Err(format!("piper synth error: {e}")));
-                    return;
-                }
-            };
-            
-            // Stream chunks from iterator as they're generated
-            for part_result in iter {
-                match part_result {
-                    Ok(samples) => {
-                        let samples_vec = samples.into_vec();
-                        if tx.blocking_send(Ok(samples_vec)).is_err() {
-                            // Receiver dropped, stop processing
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        let _ = tx.blocking_send(Err(format!("chunk error: {e}")));
-                        break;
-                    }
-                }
-            }
-            // tx is dropped here when the task completes, closing the channel
-        });
-        
-        // Send streaming status
-        let _ = socket.send(Message::Text(
-            serde_json::json!({ 
-                "type": "status", 
-                "status": "streaming", 
-                "message": "Streaming audio chunks..." 
-            }).to_string().into()
-        )).await;
-
-        // Initialize mel spectrogram processors
-        let mut stft = mel_spec::prelude::Spectrogram::new(frame_size, hop_size);
-        let mut mel = mel_spec::prelude::MelSpectrogram::new(frame_size, sample_rate as f64, n_mels);
-        
-        // Buffer for accumulating samples and streaming in chunks
-        let mut sample_buffer: Vec<f32> = Vec::new();
-        let mut total_samples = 0usize;
-        let mut offset = 0usize;
-        let mut chunk_number = 0usize;
-        let mut metadata_sent = false;
-        let mut synthesis_error = None;
-        
-        // Receive chunks from the synthesis task and stream them immediately
-        let mut synthesis_complete = false;
-        while !synthesis_complete {
-            match rx.recv().await {
-                Some(Ok(chunk_samples)) => {
-                    // Add samples to buffer
-                    sample_buffer.extend_from_slice(&chunk_samples);
-                    total_samples += chunk_samples.len();
-                    
-                    // Stream chunks from buffer while we have enough samples
-                    while sample_buffer.len() >= hop_size {
-                        let chunk: Vec<f32> = sample_buffer.drain(..hop_size).collect();
-                        
-                        // Calculate mel spectrogram frame
-                        let mel_frame_f64: Vec<f64> = if let Some(fft_frame) = stft.add(&chunk) {
-                            let arr_f64 = ndarray::Array1::from_iter(
-                                fft_frame.into_iter().map(|c: num_complex::Complex<f64>| c),
-                            );
-                            let (flat, _off) = mel.add(&arr_f64).into_raw_vec_and_offset();
-                            flat
-                        } else {
-                            vec![0.0f64; n_mels]
-                        };
-                        let mel_frame: Vec<f32> = mel_frame_f64.iter().copied().map(|v| v as f32).collect();
-                        
-                        // Send metadata after first chunk (for sample rate and hop size info)
-                        // Don't send total_chunks here - wait until we know the actual value
-                        if !metadata_sent {
-                            let _ = socket.send(Message::Text(
-                                serde_json::json!({
-                                    "type": "metadata",
-                                    "sample_rate": sample_rate as u32,
-                                    "total_samples": 0, // Unknown until complete
-                                    "estimated_duration": 0.0, // Unknown until complete
-                                    "total_chunks": 0, // Don't send estimate - wait for actual
-                                    "hop_size": hop_size
-                                }).to_string().into()
-                            )).await;
-                            metadata_sent = true;
-                        }
-                        
-                        // Calculate progress metadata
-                        // Progress is based on samples processed (offset) vs samples received so far
-                        // Since we don't know final total until synthesis completes, we use a conservative estimate
-                        chunk_number += 1;
-                        
-                        let progress = if total_samples > offset {
-                            // Progress based on what we've processed vs what we've received
-                            // Cap at 95% until we know the final total
-                            ((offset as f32 / total_samples as f32) * 100.0 * 0.95).min(95.0)
-                        } else {
-                            0.0
-                        };
-                        let timestamp = offset as f32 / sample_rate;
-                        let chunk_duration = hop_size as f32 / sample_rate;
-
-                        let msg = serde_json::json!({ 
-                            "type": "chunk",
-                            "audio": chunk, 
-                            "mel": mel_frame,
-                            "chunk": chunk_number,
-                            "total_chunks": 0, // Don't send total until we know it (final metadata)
-                            "progress": progress,
-                            "timestamp": timestamp,
-                            "duration": chunk_duration,
-                            "offset": offset
-                        });
-                        
-                        if let Err(e) = socket.send(Message::Text(msg.to_string().into())).await {
-                            warn!("Failed to send WS message: {e}");
-                            synthesis_complete = true;
-                            break;
-                        }
-                        
-                        offset += hop_size;
-                    }
-                }
-                Some(Err(e)) => {
-                    synthesis_error = Some(e);
-                    break;
-                }
-                None => {
-                    // Channel closed, synthesis complete
-                    break;
-                }
-            }
-        }
-        
-        // Wait for synthesis task to complete (in case it's still running)
-        if let Err(e) = synthesis_task.await {
-            error!("Synthesis task error: {}", e);
-            // Don't fail the request if synthesis task had an error, as we may have already sent some chunks
-        }
-        
-        // Check for synthesis errors
-        if let Some(err) = synthesis_error {
-            let err_msg = serde_json::json!({ "error": err, "code": 500 });
-            let _ = socket.send(Message::Text(err_msg.to_string().into())).await;
-            let _ = socket.close().await;
-            return;
-        }
-        
-        // Process any remaining samples in buffer (if any)
-        // Note: We don't pad with zeros - we just send what we have if it's significant
-        // The frontend can handle incomplete final chunks
-        if !sample_buffer.is_empty() && sample_buffer.len() >= hop_size / 2 {
-            // Only send if we have at least half a chunk to avoid very small final chunks
-            // Pad to hop_size for consistent processing
-            let mut final_chunk = sample_buffer.drain(..).collect::<Vec<f32>>();
-            while final_chunk.len() < hop_size {
-                final_chunk.push(0.0);
-            }
-            
-            let mel_frame_f64: Vec<f64> = if let Some(fft_frame) = stft.add(&final_chunk) {
-                let arr_f64 = ndarray::Array1::from_iter(
-                    fft_frame.into_iter().map(|c: num_complex::Complex<f64>| c),
-                );
-                let (flat, _off) = mel.add(&arr_f64).into_raw_vec_and_offset();
-                flat
-            } else {
-                vec![0.0f64; n_mels]
-            };
-            let mel_frame: Vec<f32> = mel_frame_f64.iter().copied().map(|v| v as f32).collect();
-            
-            chunk_number += 1;
-            let progress = 100.0;
-            let timestamp = offset as f32 / sample_rate;
-            let chunk_duration = hop_size as f32 / sample_rate;
-            let total_chunks = chunk_number;
-
-            let msg = serde_json::json!({ 
-                "type": "chunk",
-                "audio": final_chunk, 
-                "mel": mel_frame,
-                "chunk": chunk_number,
-                "total_chunks": total_chunks,
-                "progress": progress,
-                "timestamp": timestamp,
-                "duration": chunk_duration,
-                "offset": offset
-            });
-            
-            let _ = socket.send(Message::Text(msg.to_string().into())).await;
-        }
-        
-        // Send final metadata update with actual totals
-        let final_duration = total_samples as f32 / sample_rate;
-        let final_chunks = chunk_number;
-        let _ = socket.send(Message::Text(
-            serde_json::json!({
-                "type": "metadata",
-                "sample_rate": sample_rate as u32,
-                "total_samples": total_samples,
-                "estimated_duration": final_duration,
-                "total_chunks": final_chunks,
-                "hop_size": hop_size
-            }).to_string().into()
-        )).await;
-
-        let _ = socket.send(Message::Text(
-            serde_json::json!({ 
-                "type": "status", 
-                "status": "complete" 
-            }).to_string().into()
-        )).await;
-        let _ = socket.close().await;
-    })
 }
 
 /// WebSocket endpoint for streaming chat (LLM + TTS)
@@ -908,21 +781,10 @@ pub async fn chat_stream_ws(
         let (token_stream_tx, mut token_stream_rx) = mpsc::channel::<Result<String, String>>(100);
         let token_stream_tx_clone = token_stream_tx.clone();
         
-        // Spawn task to handle LLM streaming
-        // We need to create the stream in a way that doesn't hold the lock
-        // The stream uses channels internally, so it should be 'static after creation
+        // Spawn task to handle LLM streaming (fully async, no lock needed)
         tokio::spawn(async move {
-            // Create stream - we need to hold the lock only briefly
-            // The stream itself uses channels and spawned tasks, so it's independent
-            let mut stream = {
-                // Hold lock only to create the stream
-                let llm_guard = llm.lock().unwrap_or_else(|poisoned| {
-                    error!("LLM mutex poisoned in chat_stream_ws, recovering: {}", poisoned);
-                    poisoned.into_inner()
-                });
-                llm_guard.chat_with_history_stream(conv_id_clone, &message_clone)
-            };
-            // Lock is released here - stream should be independent
+            // Create stream directly (no mutex needed - client is async and thread-safe)
+            let mut stream = llm.chat_with_history_stream(conv_id_clone, &message_clone);
             
             // Consume stream and forward tokens
             use futures_util::StreamExt as _;
@@ -981,11 +843,13 @@ pub async fn chat_stream_ws(
                                 let tts_state_clone = tts_state.clone();
                                 let lang_clone = lang.clone();
                                 let tts_tx_for_task = tts_tx_clone.clone();
+                                // Clean text for natural TTS speech with pauses and prosody
+                                let text_for_tts_cleaned = clean_text_for_tts(&text_for_tts);
                                 
                                 pending_tts_tasks += 1;
                                 tokio::spawn(async move {
                                     let (samples, sample_rate) = match tokio::task::spawn_blocking(move || {
-                                        tts_state_clone.synthesize_with_sample_rate(&text_for_tts, Some(&lang_clone), None)
+                                        tts_state_clone.synthesize_with_sample_rate(&text_for_tts_cleaned, Some(&lang_clone), None, None)
                                     }).await {
                                         Ok(Ok(result)) => result,
                                         Ok(Err(e)) => {
@@ -1021,6 +885,8 @@ pub async fn chat_stream_ws(
                             if !accumulated_text.is_empty() {
                                 let text_for_tts = accumulated_text.clone();
                                 accumulated_text.clear();
+                                // Clean text for natural TTS speech with pauses and prosody
+                                let text_for_tts_cleaned = clean_text_for_tts(&text_for_tts);
                                 pending_tts_tasks += 1;
                                 
                                 let tts_state_final = tts_state.clone();
@@ -1029,7 +895,7 @@ pub async fn chat_stream_ws(
                                 
                                 tokio::spawn(async move {
                                     match tokio::task::spawn_blocking(move || {
-                                        tts_state_final.synthesize_with_sample_rate(&text_for_tts, Some(&lang_final), None)
+                                        tts_state_final.synthesize_with_sample_rate(&text_for_tts_cleaned, Some(&lang_final), None, None)
                                     }).await {
                                         Ok(Ok((samples, sample_rate))) => {
                                             match tts_core::TtsManager::encode_wav_base64(&samples, sample_rate) {
@@ -1118,8 +984,44 @@ pub async fn chat_stream_ws(
     })
 }
 
+/// Detect emotional tone from text based on punctuation and keywords
+/// Returns a prosody hint (rate, pitch) for more expressive speech
+fn detect_emotion(text: &str) -> (f32, f32) {
+    let text_lower = text.to_lowercase();
+    
+    // Excitement indicators (exclamation marks, exciting words)
+    let has_excitement = text.contains('!') || 
+        text_lower.contains("amazing") || text_lower.contains("wonderful") || 
+        text_lower.contains("fantastic") || text_lower.contains("incredible") ||
+        text_lower.contains("excellent") || text_lower.contains("great");
+    
+    // Question indicators (questions typically have rising intonation)
+    let is_question = text.trim_end().ends_with('?');
+    
+    // Sadness/concern indicators
+    let has_concern = text_lower.contains("sorry") || text_lower.contains("unfortunately") ||
+        text_lower.contains("problem") || text_lower.contains("issue") ||
+        text_lower.contains("difficult") || text_lower.contains("challenge");
+    
+    // Adjust prosody based on emotion
+    if has_excitement {
+        // Slightly faster, higher pitch for excitement
+        (1.05, 1.1)
+    } else if is_question {
+        // Normal speed, slightly higher pitch for questions (rising intonation)
+        (1.0, 1.05)
+    } else if has_concern {
+        // Slightly slower, lower pitch for concern
+        (0.95, 0.95)
+    } else {
+        // Neutral prosody
+        (1.0, 1.0)
+    }
+}
+
 /// Clean text for natural TTS speech
 /// Removes markdown, special formatting, and converts text to be more natural for speech
+/// Enhanced with pause markers for commas and sentence endings for all languages
 fn clean_text_for_tts(text: &str) -> String {
     let mut cleaned = text.to_string();
     
@@ -1236,28 +1138,82 @@ fn clean_text_for_tts(text: &str) -> String {
     cleaned = cleaned.replace(" ;", ";");
     cleaned = cleaned.replace(" :", ":");
     
-    // Ensure space after punctuation (but not if it's already there or at end of string)
-    // Use a more careful approach to avoid double spaces
+    // Enhanced: Add natural pauses for commas and sentence endings
+    // This helps TTS systems naturally pause at appropriate points for all languages
     let mut result = String::with_capacity(cleaned.len() * 2);
     let chars: Vec<char> = cleaned.chars().collect();
     for i in 0..chars.len() {
         result.push(chars[i]);
-        if matches!(chars[i], ',' | '.' | '!' | '?' | ';' | ':') {
-            // Add space after punctuation if not at end and next char is not whitespace or punctuation
-            if i + 1 < chars.len() {
-                let next_char = chars[i + 1];
-                if !next_char.is_whitespace() && !matches!(next_char, ',' | '.' | '!' | '?' | ';' | ':' | ')') {
-                    result.push(' ');
+        
+        // Add pause markers after punctuation
+        if i + 1 < chars.len() {
+            let next_char = chars[i + 1];
+            
+            match chars[i] {
+                // Commas: short pause (add extra space for natural pause)
+                ',' if !next_char.is_whitespace() && !matches!(next_char, ',' | '.' | '!' | '?' | ';' | ':' | ')') => {
+                    result.push_str("  "); // Double space for short pause hint
+                }
+                // Semicolons: medium pause
+                ';' if !next_char.is_whitespace() && !matches!(next_char, ',' | '.' | '!' | '?' | ';' | ':' | ')') => {
+                    result.push_str("   "); // Triple space for medium pause
+                }
+                // Colons: medium pause
+                ':' if !next_char.is_whitespace() && !matches!(next_char, ',' | '.' | '!' | '?' | ';' | ':' | ')') => {
+                    result.push_str("   "); // Triple space for medium pause
+                }
+                // Sentence endings: longer pause (period, exclamation, question)
+                '.' | '!' | '?' if !next_char.is_whitespace() && !matches!(next_char, ',' | '.' | '!' | '?' | ';' | ':' | ')') => {
+                    // Check if this is an abbreviation (e.g., "Dr.", "Mr.", "etc.")
+                    let is_abbrev = if i >= 2 {
+                        let prev_chars = &chars[i.saturating_sub(3)..=i];
+                        let prev_str: String = prev_chars.iter().collect();
+                        prev_str.ends_with("Dr.") || prev_str.ends_with("Mr.") || 
+                        prev_str.ends_with("Mrs.") || prev_str.ends_with("Ms.") ||
+                        prev_str.ends_with("Prof.") || prev_str.ends_with("etc.") ||
+                        prev_str.ends_with("vs.") || prev_str.ends_with("e.g.") ||
+                        prev_str.ends_with("i.e.") || prev_str.ends_with("a.m.") ||
+                        prev_str.ends_with("p.m.")
+                    } else {
+                        false
+                    };
+                    
+                    if !is_abbrev {
+                        result.push_str("    "); // Quadruple space for longer sentence-ending pause
+                    } else {
+                        result.push(' '); // Just single space for abbreviations
+                    }
+                }
+                _ => {
+                    // Ensure space after punctuation if needed
+                    if matches!(chars[i], ',' | '.' | '!' | '?' | ';' | ':') && 
+                       !next_char.is_whitespace() && 
+                       !matches!(next_char, ',' | '.' | '!' | '?' | ';' | ':' | ')') {
+                        result.push(' ');
+                    }
                 }
             }
         }
     }
     cleaned = result;
     
-    // Clean up double spaces that might have been created
-    while cleaned.contains("  ") {
-        cleaned = cleaned.replace("  ", " ");
+    // Clean up excessive spaces (more than 4 consecutive spaces) but keep pause hints
+    // This normalizes while preserving intentional pauses
+    let mut result = String::with_capacity(cleaned.len());
+    let mut space_count = 0;
+    for ch in cleaned.chars() {
+        if ch == ' ' {
+            space_count += 1;
+            // Keep up to 4 spaces (for sentence endings), normalize beyond that
+            if space_count <= 4 {
+                result.push(ch);
+            }
+        } else {
+            space_count = 0;
+            result.push(ch);
+        }
     }
+    cleaned = result;
     
     // Remove leading/trailing whitespace
     cleaned = cleaned.trim().to_string();

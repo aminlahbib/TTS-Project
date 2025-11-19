@@ -7,15 +7,13 @@ export function initElements() {
     return {
         // Forms
         ttsForm: document.getElementById('ttsForm'),
-        streamForm: document.getElementById('streamForm'),
         chatForm: document.getElementById('chatForm'),
         
         // Inputs
         ttsText: document.getElementById('ttsText'),
-        ttsLanguage: document.getElementById('ttsLanguage'),
-        ttsSpeaker: document.getElementById('ttsSpeaker'),
-        streamText: document.getElementById('streamText'),
-        streamLanguage: document.getElementById('streamLanguage'),
+        ttsVoice: document.getElementById('ttsVoice'),
+        ttsLanguage: document.getElementById('ttsLanguage'), // Language selector (first step)
+        ttsResultsContent: document.getElementById('ttsResultsContent'),
         chatInput: document.getElementById('chatInput'),
         chatMicBtn: document.getElementById('chatMicBtn'),
         voiceModeToggleBtn: document.getElementById('voiceModeToggleBtn'),
@@ -27,34 +25,25 @@ export function initElements() {
         voiceModeLanguage: document.getElementById('voiceModeLanguage'),
         textInputWrapper: document.getElementById('textInputWrapper'),
         serverUrl: document.getElementById('serverUrl'),
+        llmProvider: document.getElementById('llmProvider'),
         
         // Buttons
         ttsBtn: document.getElementById('ttsBtn'),
-        streamBtn: document.getElementById('streamBtn'),
         chatBtn: document.getElementById('chatBtn'),
         clearChatBtn: document.getElementById('clearChatBtn'),
         exportChatBtn: document.getElementById('exportChatBtn'),
         
-        // Status and Output
-        ttsStatus: document.getElementById('ttsStatus'),
-        streamStatus: document.getElementById('streamStatus'),
+        // Status and Output (legacy status elements removed - using inline status messages now)
         chatStatus: document.getElementById('chatStatus'),
         serverStatus: document.getElementById('serverStatus'),
+        llmStatus: document.getElementById('llmStatus'),
         serverInfo: document.getElementById('serverInfo'),
         
         // Audio and Media
         ttsAudio: document.getElementById('ttsAudio'),
-        streamAudio: document.getElementById('streamAudio'),
-        streamAudioContainer: document.getElementById('streamAudioContainer'),
-        streamDownloadBtn: document.getElementById('streamDownloadBtn'),
         ttsSpectrogram: document.getElementById('ttsSpectrogram'),
         ttsSpectrogramCanvas: document.getElementById('ttsSpectrogramCanvas'),
-        streamSpectrogram: document.getElementById('streamSpectrogram'),
-        streamSpectrogramCanvas: document.getElementById('streamSpectrogramCanvas'),
-        streamWaveform: document.getElementById('streamWaveform'),
         chatMessages: document.getElementById('chatMessages'),
-        streamProgress: document.getElementById('streamProgress'),
-        streamMetrics: document.getElementById('streamMetrics'),
         serverMetrics: document.getElementById('serverMetrics'),
         
         // Custom Audio Player - TTS
@@ -66,14 +55,6 @@ export function initElements() {
         ttsSpeed: document.getElementById('ttsSpeed'),
         ttsCurrentTime: document.querySelector('#ttsAudioPlayer .current-time'),
         ttsDuration: document.querySelector('#ttsAudioPlayer .duration'),
-        
-        // Custom Audio Player - Stream
-        streamAudioPlayer: document.getElementById('streamAudioPlayer'),
-        streamPlayPause: document.getElementById('streamPlayPause'),
-        streamProgressSlider: document.getElementById('streamProgressSlider'),
-        streamSpeed: document.getElementById('streamSpeed'),
-        streamCurrentTime: document.getElementById('streamCurrentTime'),
-        streamDuration: document.getElementById('streamDuration'),
 
         // Voice Chat tab elements
         voiceChatMicBtn: document.getElementById('voiceChatMicBtn'),
@@ -82,7 +63,8 @@ export function initElements() {
         voiceChatBotCanvas: document.getElementById('voiceResponseCanvas'),
         voiceBotSpectrogram: document.getElementById('voiceBotSpectrogram'),
         voiceChatStatus: document.getElementById('voiceChatStatus'),
-        voiceChatLanguage: document.getElementById('voiceChatLanguage'),
+        voiceChatVoice: document.getElementById('voiceChatVoice'),
+        voiceChatLanguage: document.getElementById('voiceChatLanguage'), // Language selector (first step)
         voiceTranscriptContainer: document.getElementById('voiceTranscriptContainer'),
         voiceTranscriptText: document.getElementById('voiceTranscriptText'),
         voiceConversationLog: document.getElementById('voiceConversationLog'),
@@ -90,7 +72,6 @@ export function initElements() {
         // Groups
         speakerGroup: document.getElementById('speakerGroup'),
         ttsCharCount: document.getElementById('ttsCharCount'),
-        streamCharCount: document.getElementById('streamCharCount'),
         
         // Toast container
         toastContainer: document.getElementById('toastContainer')
@@ -108,8 +89,8 @@ export function setButtonState(button, disabled, text) {
     const btnSpinner = button.querySelector('.btn-spinner');
     const sendIcon = button.querySelector('.send-icon');
     
-    // For chat button, keep icon visible, hide text
-    if (button.id === 'chatBtn') {
+    // For chat and TTS buttons, keep icon visible, hide text, show spinner when disabled
+    if (button.id === 'chatBtn' || button.id === 'ttsBtn') {
         if (btnSpinner) {
             if (disabled) {
                 btnSpinner.classList.remove('hidden');

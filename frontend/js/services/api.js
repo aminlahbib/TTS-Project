@@ -10,6 +10,61 @@ if (!CONFIG) {
 
 const { REQUEST } = CONFIG;
 
+// Request deduplication cache
+const pendingRequests = new Map();
+
+// Response cache with TTL
+const responseCache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+function getCacheKey(url, options = {}) {
+    const method = options.method || 'GET';
+    const body = options.body || '';
+    return `${method}:${url}:${body}`;
+}
+
+function isCacheable(method, url) {
+    // Only cache GET requests for static data
+    if (method !== 'GET') return false;
+    // Cache voices endpoints
+    return url.includes('/voices') || url.includes('/health');
+}
+
+async function getCachedResponse(cacheKey) {
+    const cached = responseCache.get(cacheKey);
+    if (!cached) return null;
+    
+    const now = Date.now();
+    if (now - cached.timestamp > CACHE_TTL) {
+        responseCache.delete(cacheKey);
+        return null;
+    }
+    
+    // Recreate response from cached data
+    return new Response(cached.data, {
+        status: cached.status,
+        statusText: cached.statusText,
+        headers: cached.headers
+    });
+}
+
+async function setCachedResponse(cacheKey, response) {
+    // Clone response data before caching
+    const data = await response.clone().arrayBuffer();
+    const headers = {};
+    response.headers.forEach((value, key) => {
+        headers[key] = value;
+    });
+    
+    responseCache.set(cacheKey, {
+        data: data,
+        status: response.status,
+        statusText: response.statusText,
+        headers: headers,
+        timestamp: Date.now()
+    });
+}
+
 // Get API_BASE lazily (will be computed when first accessed)
 function getApiBase() {
     try {
@@ -40,46 +95,73 @@ function logApiConfig() {
 
 
 async function fetchWithErrorHandling(url, options = {}) {
-    try {
-        console.log('[API] Fetching:', { url, method: options.method || 'GET' });
-        const response = await fetch(url, options);
-        
-        console.log('[API] Response received:', {
-            url,
-            status: response.status,
-            statusText: response.statusText,
-            ok: response.ok,
-            headers: Object.fromEntries(response.headers.entries())
-        });
-        
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => {
-                // Try to get text if JSON fails
-                return response.text().then(text => ({ error: text || `HTTP ${response.status}` }));
-            });
-            const errorMsg = errorData.error || `HTTP ${response.status}: ${response.statusText}`;
-            console.error('[API] Request failed:', { url, status: response.status, error: errorMsg });
-            throw new Error(errorMsg);
+    const method = options.method || 'GET';
+    const cacheKey = getCacheKey(url, options);
+    
+    // Check cache for GET requests
+    if (isCacheable(method, url)) {
+        const cached = await getCachedResponse(cacheKey);
+        if (cached) {
+            return cached;
         }
-        
-        return response;
-    } catch (error) {
-        console.error('[API] Fetch error:', {
-            url,
-            name: error.name,
-            message: error.message,
-            stack: error.stack
-        });
-        
-        // Handle specific error types
-        if (error.name === 'AbortError' || error.name === 'TimeoutError') {
-            throw new Error('Request timed out. Please try again.');
-        } else if (error.name === 'TypeError' && error.message.includes('fetch')) {
-            const apiBase = getApiBase();
-            throw new Error(`Cannot connect to server at ${apiBase}. Is the server running? Check browser console for CORS errors.`);
-        }
-        throw error;
     }
+    
+    // Check for duplicate pending requests
+    if (pendingRequests.has(cacheKey)) {
+        return pendingRequests.get(cacheKey);
+    }
+    
+    // Create request promise
+    const requestPromise = (async () => {
+        try {
+            const response = await fetch(url, options);
+            
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => {
+                    // Try to get text if JSON fails
+                    return response.text().then(text => ({ error: text || `HTTP ${response.status}` }));
+                });
+                const errorMsg = errorData.error || `HTTP ${response.status}: ${response.statusText}`;
+                console.error('[API] Request failed:', { url, status: response.status, error: errorMsg });
+                throw new Error(errorMsg);
+            }
+            
+            // Cache successful GET responses (don't await to avoid blocking)
+            if (isCacheable(method, url)) {
+                // Clone response before caching so we can still return the original
+                const responseClone = response.clone();
+                setCachedResponse(cacheKey, responseClone).catch(err => {
+                    console.warn('[API] Failed to cache response:', err);
+                });
+            }
+            
+            return response;
+        } catch (error) {
+            console.error('[API] Fetch error:', {
+                url,
+                name: error.name,
+                message: error.message,
+                stack: error.stack
+            });
+            
+            // Handle specific error types
+            if (error.name === 'AbortError' || error.name === 'TimeoutError') {
+                throw new Error('Request timed out. Please try again.');
+            } else if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                const apiBase = getApiBase();
+                throw new Error(`Cannot connect to server at ${apiBase}. Is the server running? Check browser console for CORS errors.`);
+            }
+            throw error;
+        } finally {
+            // Remove from pending requests
+            pendingRequests.delete(cacheKey);
+        }
+    })();
+    
+    // Store pending request
+    pendingRequests.set(cacheKey, requestPromise);
+    
+    return requestPromise;
 }
 
 
@@ -87,13 +169,6 @@ export async function checkServerHealth() {
     logApiConfig();
     const apiBase = getApiBase();
     const url = `${apiBase}/health`;
-    console.log('[API] Checking server health at:', url);
-    console.log('[API] Full request details:', {
-        url,
-        apiBase,
-        method: 'GET',
-        headers: { 'Accept': 'text/plain' }
-    });
     
     try {
         const response = await fetch(url, {
@@ -101,13 +176,6 @@ export async function checkServerHealth() {
             headers: {
                 'Accept': 'text/plain',
             },
-        });
-        
-        console.log('[API] Health check response:', {
-            status: response.status,
-            statusText: response.statusText,
-            ok: response.ok,
-            headers: Object.fromEntries(response.headers.entries())
         });
         
         if (!response.ok) {
@@ -122,7 +190,6 @@ export async function checkServerHealth() {
         }
         
         const text = await response.text();
-        console.log('[API] Health check successful:', text);
         return text;
     } catch (error) {
         console.error('[API] Health check error:', {
@@ -167,19 +234,27 @@ export async function getVoiceDetails() {
 
 /**
  * Generate TTS audio
+ * @param {string} text - Text to synthesize
+ * @param {string} language - Language code (e.g., "en_US")
+ * @param {number|null} speaker - Speaker ID (legacy, optional)
+ * @param {string|null} voice - Voice ID (e.g., "norman") or full key (e.g., "en_US:norman")
  */
-export async function generateTTS(text, language, speaker = null) {
+export async function generateTTS(text, language, speaker = null, voice = null) {
     const requestBody = { text, language };
-    if (speaker !== null) {
+    
+    // Support both new voice parameter and legacy speaker parameter
+    if (voice !== null && voice !== undefined) {
+        // If voice contains ":", it's a full key, extract just the voice part
+        if (voice.includes(':')) {
+            const [, voiceId] = voice.split(':', 2);
+            requestBody.voice = voiceId;
+        } else {
+            requestBody.voice = voice;
+        }
+    } else if (speaker !== null && speaker !== undefined) {
+        // Legacy support
         requestBody.speaker = speaker;
     }
-    
-    console.log('[API] Generating TTS:', { 
-        textLength: text.length, 
-        language, 
-        speaker,
-        url: `${getApiBase()}/tts`
-    });
     
     const response = await fetchWithErrorHandling(`${getApiBase()}/tts`, {
         method: 'POST',
@@ -191,13 +266,6 @@ export async function generateTTS(text, language, speaker = null) {
     });
     
     const data = await response.json();
-    console.log('[API] TTS Response:', {
-        hasAudio: !!data.audio_base64,
-        audioLength: data.audio_base64?.length || 0,
-        duration: data.duration_ms,
-        sampleRate: data.sample_rate,
-        keys: Object.keys(data)
-    });
     
     // Validate response structure
     if (!data.audio_base64) {
@@ -214,45 +282,117 @@ export async function generateTTS(text, language, speaker = null) {
 }
 
 /**
- * Send chat message
+ * Send chat message with improved error handling
  */
-export async function sendChatMessage(message, conversationId = null) {
+export async function sendChatMessage(message, conversationId = null, retries = 1) {
     const requestBody = { message };
     if (conversationId) {
         requestBody.conversation_id = conversationId;
     }
     
-    const response = await fetchWithErrorHandling(`${getApiBase()}/chat`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(REQUEST.LLM_TIMEOUT)
-    });
+    let lastError;
     
-    return await response.json();
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            const response = await fetchWithErrorHandling(`${getApiBase()}/chat`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestBody),
+                signal: AbortSignal.timeout(REQUEST.LLM_TIMEOUT)
+            });
+            const data = await response.json();
+            
+            // Validate response
+            if (!data || (data.error && !data.reply)) {
+                throw new Error(data.error || 'Invalid response from server');
+            }
+            
+            return data;
+        } catch (error) {
+            lastError = error;
+            
+            // Check if it's a client error (4xx) - don't retry these
+            const isClientError = error.message?.match(/HTTP (4\d{2})/) || 
+                                 error.message?.includes('400') || 
+                                 error.message?.includes('401') || 
+                                 error.message?.includes('403') ||
+                                 error.message?.includes('404');
+            
+            // Don't retry on client errors (4xx) or if it's the last attempt
+            if (isClientError || attempt === retries) {
+                throw error;
+            }
+            
+            // Wait before retry (exponential backoff)
+            await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+            console.warn(`[API] Chat request attempt ${attempt + 1} failed, retrying...`, error.message);
+        }
+    }
+    
+    throw lastError;
 }
 
 /**
- * Send voice chat message (with audio response)
+ * Send voice chat message (with audio response) with improved error handling
+ * @param {string} message - Message to send
+ * @param {string} language - Language code (e.g., "en_US")
+ * @param {string|null} conversationId - Conversation ID (optional)
+ * @param {string|null} voice - Voice ID (e.g., "norman") (optional)
+ * @param {number} retries - Number of retry attempts (default: 1)
  */
-export async function sendVoiceChatMessage(message, language, conversationId = null) {
+export async function sendVoiceChatMessage(message, language, conversationId = null, voice = null, retries = 1) {
     const requestBody = { message, language };
     if (conversationId) {
         requestBody.conversation_id = conversationId;
     }
+    if (voice !== null && voice !== undefined) {
+        requestBody.voice = voice;
+    }
     
-    const response = await fetchWithErrorHandling(`${getApiBase()}/voice-chat`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(REQUEST.LLM_TIMEOUT)
-    });
+    let lastError;
     
-    return await response.json();
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            const response = await fetchWithErrorHandling(`${getApiBase()}/voice-chat`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestBody),
+                signal: AbortSignal.timeout(REQUEST.LLM_TIMEOUT)
+            });
+            const data = await response.json();
+            
+            // Validate response
+            if (!data || (data.error && !data.reply && !data.audio_base64)) {
+                throw new Error(data.error || 'Invalid response from server');
+            }
+            
+            return data;
+        } catch (error) {
+            lastError = error;
+            
+            // Check if it's a client error (4xx) - don't retry these
+            const isClientError = error.message?.match(/HTTP (4\d{2})/) || 
+                                 error.message?.includes('400') || 
+                                 error.message?.includes('401') || 
+                                 error.message?.includes('403') ||
+                                 error.message?.includes('404');
+            
+            // Don't retry on client errors (4xx) or if it's the last attempt
+            if (isClientError || attempt === retries) {
+                throw error;
+            }
+            
+            // Wait before retry (exponential backoff)
+            await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+            console.warn(`[API] Voice chat request attempt ${attempt + 1} failed, retrying...`, error.message);
+        }
+    }
+    
+    throw lastError;
 }
 
 /**

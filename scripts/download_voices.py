@@ -11,12 +11,12 @@ REPO_TYPE = "model"  # <-- fix
 # Each entry is (local_lang_dir, repo_dir_prefix)
 # Use the folder prefixes shown in VOICES.md under this repo.
 VOICE_DIRS = [
-    # German (de_DE) - mls medium
-    ("de_DE", "de/de_DE/mls/medium"),
+    # German (de_DE) - thorsten medium
+    ("de_DE", "de/de_DE/thorsten/medium"),
     # French (fr_FR) - siwis medium
     ("fr_FR", "fr/fr_FR/siwis/medium"),
-    # Dutch (nl_NL) - i6 medium
-    ("nl_NL", "nl/nl_NL/i6/medium"),
+    # Dutch (nl_NL) - ronnie medium
+    ("nl_NL", "nl/nl_NL/ronnie/medium"),
     # Arabic (ar_JO) - ep medium
     ("ar_JO", "ar/ar_JO/ep/medium"),
     # Add more from VOICES.md as needed...

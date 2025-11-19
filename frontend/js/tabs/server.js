@@ -78,6 +78,7 @@ export function initServerTab(elements) {
                 
                 // Status card
                 const statusCard = templates.cardTemplate.content.cloneNode(true).querySelector('.metric-card');
+                statusCard.setAttribute('data-status', 'connected');
                 statusCard.querySelector('.metric-label').textContent = 'Server Status';
                 const statusValue = statusCard.querySelector('.metric-value');
                 statusValue.textContent = 'Connected';
@@ -87,10 +88,12 @@ export function initServerTab(elements) {
                 
                 // Response time card
                 const timeCard = templates.cardTemplate.content.cloneNode(true).querySelector('.metric-card');
+                const responseTimeColor = responseTimeMs < 100 ? '#10b981' : responseTimeMs < 300 ? '#f59e0b' : '#ef4444';
                 timeCard.querySelector('.metric-label').textContent = 'Response Time';
                 const timeValue = timeCard.querySelector('.metric-value');
                 timeValue.textContent = responseTimeMs > 0 ? `${responseTimeMs}ms` : 'N/A';
-                timeCard.querySelector('.metric-detail').textContent = 'Health check response';
+                timeValue.style.color = responseTimeColor;
+                timeCard.querySelector('.metric-detail').textContent = 'Health check response time';
                 grid.appendChild(timeCard);
                 
                 elements.serverInfo.innerHTML = '';
@@ -111,6 +114,7 @@ export function initServerTab(elements) {
                 
                 const grid = templates.gridTemplate.content.cloneNode(true).querySelector('.metrics-grid');
                 const errorCard = templates.cardTemplate.content.cloneNode(true).querySelector('.metric-card');
+                errorCard.setAttribute('data-status', 'disconnected');
                 errorCard.querySelector('.metric-label').textContent = 'Server Status';
                 const errorValue = errorCard.querySelector('.metric-value');
                 errorValue.textContent = 'Disconnected';
@@ -230,10 +234,14 @@ export function initServerTab(elements) {
             metricsGrid = grid; // Store reference for updates
             
             // Helper function to create a metric card
-            const createMetricCard = (label, value, detail, showBar = false, barWidth = 0, barColor = '#10b981') => {
+            const createMetricCard = (label, value, detail, showBar = false, barWidth = 0, barColor = '#10b981', valueColor = null) => {
                 const card = templates.cardTemplate.content.cloneNode(true).querySelector('.metric-card');
                 card.querySelector('.metric-label').textContent = label;
-                card.querySelector('.metric-value').textContent = value;
+                const valueEl = card.querySelector('.metric-value');
+                valueEl.textContent = value;
+                if (valueColor) {
+                    valueEl.style.color = valueColor;
+                }
                 if (detail) {
                     card.querySelector('.metric-detail').textContent = detail;
                 }
@@ -362,11 +370,19 @@ export function initServerTab(elements) {
                 
                 const grid = templates.gridTemplate.content.cloneNode(true).querySelector('.metrics-grid');
                 
-                voicesList.forEach(voice => {
+                voicesList.forEach((voice, index) => {
                     const card = templates.cardTemplate.content.cloneNode(true).querySelector('.metric-card');
+                    card.style.animationDelay = `${index * 0.05}s`;
                     card.querySelector('.metric-label').textContent = 'Voice';
-                    card.querySelector('.metric-value').textContent = formatLanguageName(voice);
-                    card.querySelector('.metric-detail').textContent = voice;
+                    const valueEl = card.querySelector('.metric-value');
+                    valueEl.textContent = formatLanguageName(voice);
+                    valueEl.style.fontSize = '1.5rem';
+                    valueEl.style.color = 'var(--primary)';
+                    const detailEl = card.querySelector('.metric-detail');
+                    detailEl.textContent = voice;
+                    detailEl.style.fontFamily = 'monospace';
+                    detailEl.style.fontSize = '0.8rem';
+                    detailEl.style.color = 'var(--text-muted)';
                     grid.appendChild(card);
                 });
                 
@@ -407,12 +423,30 @@ export function initServerTab(elements) {
                 
                 const grid = templates.gridTemplate.content.cloneNode(true).querySelector('.metrics-grid');
                 
-                details.forEach(v => {
+                details.forEach((v, index) => {
                     const card = templates.cardTemplate.content.cloneNode(true).querySelector('.metric-card');
+                    card.style.animationDelay = `${index * 0.05}s`;
                     card.querySelector('.metric-label').textContent = 'Voice';
-                    card.querySelector('.metric-value').textContent = formatLanguageName(v.key);
+                    const valueEl = card.querySelector('.metric-value');
+                    valueEl.textContent = formatLanguageName(v.key);
+                    valueEl.style.fontSize = '1.5rem';
+                    valueEl.style.color = 'var(--primary)';
                     const detailEl = card.querySelector('.metric-detail');
-                    detailEl.innerHTML = `<strong>Code:</strong> ${v.key}<br><strong>Config:</strong> ${v.config}<br><strong>Speaker:</strong> ${v.speaker !== null ? v.speaker : 'Default'}`;
+                    detailEl.innerHTML = `
+                        <div style="margin-bottom: 0.5rem;">
+                            <strong style="color: var(--text);">Code:</strong> 
+                            <span style="font-family: monospace; color: var(--text-muted);">${v.key}</span>
+                        </div>
+                        <div style="margin-bottom: 0.5rem;">
+                            <strong style="color: var(--text);">Config:</strong> 
+                            <span style="font-family: monospace; color: var(--text-muted); font-size: 0.85rem;">${v.config}</span>
+                        </div>
+                        <div>
+                            <strong style="color: var(--text);">Speaker:</strong> 
+                            <span style="color: var(--text-muted);">${v.speaker !== null ? v.speaker : 'Default'}</span>
+                        </div>
+                    `;
+                    detailEl.style.lineHeight = '1.6';
                     grid.appendChild(card);
                 });
                 
