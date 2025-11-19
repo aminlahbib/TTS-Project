@@ -96,8 +96,8 @@ impl OllamaClient {
             Client::builder()
                 .timeout(Duration::from_secs(120))
                 .tcp_keepalive(Duration::from_secs(60))
-                .pool_max_idle_per_host(50)
-                .pool_idle_timeout(Duration::from_secs(90))
+                .pool_max_idle_per_host(30) // Reduced from 50 to 30 for lower memory
+                .pool_idle_timeout(Duration::from_secs(60)) // Reduced from 90 to 60 seconds
                 .build()?
         );
         
@@ -108,19 +108,19 @@ impl OllamaClient {
             num_ctx: env::var("OLLAMA_NUM_CTX")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(4096), // Half of max context for speed
+                .unwrap_or(2048), // Reduced from 4096 for lower memory usage
             temperature: env::var("OLLAMA_TEMPERATURE")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(0.7),
+                .unwrap_or(0.5), // Lower for faster, more focused responses
             top_p: env::var("OLLAMA_TOP_P")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(0.9),
+                .unwrap_or(0.8), // More focused
             num_predict: env::var("OLLAMA_NUM_PREDICT")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(512), // Limit response length
+                .unwrap_or(256), // Reduced from 512 for faster responses
         })
     }
     
@@ -163,6 +163,10 @@ impl LlmProviderTrait for OllamaClient {
             temperature: f32,
             top_p: f32,
             num_predict: i32,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            top_k: Option<u32>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            repeat_penalty: Option<f32>,
         }
         #[derive(Deserialize)]
         struct Resp { message: RMsg }
@@ -187,6 +191,14 @@ impl LlmProviderTrait for OllamaClient {
                 temperature: self.temperature,
                 top_p: self.top_p,
                 num_predict: self.num_predict,
+                top_k: env::var("OLLAMA_TOP_K")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .or(Some(20)),
+                repeat_penalty: env::var("OLLAMA_REPEAT_PENALTY")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .or(Some(1.1)),
             },
         };
         
@@ -231,6 +243,10 @@ impl LlmProviderTrait for OllamaClient {
                 temperature: f32,
                 top_p: f32,
                 num_predict: i32,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                top_k: Option<u32>,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                repeat_penalty: Option<f32>,
             }
             #[derive(Deserialize)]
             struct StreamResp {
@@ -255,6 +271,8 @@ impl LlmProviderTrait for OllamaClient {
                     temperature,
                     top_p,
                     num_predict,
+                    top_k: Some(20),
+                    repeat_penalty: Some(1.1),
                 },
             };
 
@@ -414,13 +432,13 @@ impl LlmClient {
             provider,
             storage: None,
             conversations: Arc::new(RwLock::new(LruCache::new(
-                std::num::NonZeroUsize::new(100).unwrap() // Max 100 conversations
+                std::num::NonZeroUsize::new(50).unwrap() // Reduced from 100 to 50 for lower memory
             ))),
             response_cache: Arc::new(RwLock::new(LruCache::new(
-                std::num::NonZeroUsize::new(500).unwrap() // Max 500 cached responses
+                std::num::NonZeroUsize::new(200).unwrap() // Reduced from 500 to 200 for lower memory
             ))),
-            conversation_ttl: Duration::from_secs(3600), // 1 hour
-            cache_ttl: Duration::from_secs(3600), // 1 hour
+            conversation_ttl: Duration::from_secs(1800), // Reduced from 1 hour to 30 minutes
+            cache_ttl: Duration::from_secs(1800), // Reduced from 1 hour to 30 minutes
         })
     }
 
@@ -433,13 +451,13 @@ impl LlmClient {
             provider,
             storage: Some(storage),
             conversations: Arc::new(RwLock::new(LruCache::new(
-                std::num::NonZeroUsize::new(100).unwrap()
+                std::num::NonZeroUsize::new(50).unwrap() // Reduced for lower memory
             ))),
             response_cache: Arc::new(RwLock::new(LruCache::new(
-                std::num::NonZeroUsize::new(500).unwrap()
+                std::num::NonZeroUsize::new(200).unwrap() // Reduced for lower memory
             ))),
-            conversation_ttl: Duration::from_secs(3600),
-            cache_ttl: Duration::from_secs(3600),
+            conversation_ttl: Duration::from_secs(1800), // 30 minutes
+            cache_ttl: Duration::from_secs(1800), // 30 minutes
         })
     }
 
@@ -529,8 +547,8 @@ impl LlmClient {
             });
             convo.updated_at = Utc::now();
 
-            // Optimized: send only last 6 turns (12 messages) instead of 10
-            let compact = Self::tail(&convo.messages, 6);
+            // Optimized: send only last 4 turns (8 messages) for lower memory usage
+            let compact = Self::tail(&convo.messages, 4);
             
             // Store updated conversation
             convs.put(conv_id.clone(), ConversationEntry {
@@ -636,8 +654,8 @@ impl LlmClient {
                 });
                 convo.updated_at = Utc::now();
 
-                // Optimized: 6 turns instead of 10
-                let compact = Self::tail(&convo.messages, 6);
+                // Optimized: 4 turns for lower memory usage
+                let compact = Self::tail(&convo.messages, 4);
                 
                 convs.put(conv_id.clone(), ConversationEntry {
                     conversation: convo,
