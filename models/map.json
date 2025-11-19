@@ -43,12 +43,6 @@
   "de_DE": {
     "default_voice": "thorsten",
     "voices": {
-      "mls": {
-        "config": "models/de_DE/mls/config.onnx.json",
-        "display_name": "MLS",
-        "gender": "unknown",
-        "quality": "medium"
-      },
       "thorsten": {
         "config": "models/de_DE/thorsten/config.onnx.json",
         "display_name": "Thorsten",
@@ -72,12 +66,6 @@
   "fr_FR": {
     "default_voice": "siwis",
     "voices": {
-      "mls": {
-        "config": "models/fr_FR/mls/config.onnx.json",
-        "display_name": "MLS",
-        "gender": "unknown",
-        "quality": "medium"
-      },
       "siwis": {
         "config": "models/fr_FR/siwis/config.onnx.json",
         "display_name": "Siwis",
