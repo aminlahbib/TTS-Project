@@ -1,0 +1,6 @@
+[env]
+# Set include path for espeak-ng headers on macOS (Homebrew)
+BINDGEN_EXTRA_CLANG_ARGS = "-I/opt/homebrew/opt/espeak-ng/include"
+# Set PKG_CONFIG_PATH so pkg-config can find espeak-ng
+PKG_CONFIG_PATH = "/opt/homebrew/opt/espeak-ng/lib/pkgconfig"
+
