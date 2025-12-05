@@ -1,0 +1,6 @@
+# Railway Ignore
+models/
+target/
+.git/
+performance_results/
+*.pdf
