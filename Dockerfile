@@ -51,7 +51,7 @@ COPY --from=builder /app/target/release/server /app/server
 # Models are mounted as a volume at runtime (see docker-compose.yml)
 # This avoids bloating the image and allows updating models without rebuilding
 # FOR DEPLOYMENT w/o VOLUMES: Uncomment the line below to bake models into the image
-COPY models ./models
+COPY models /app/models
 
 # Set ownership
 RUN chown -R appuser:appuser /app

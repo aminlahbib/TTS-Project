@@ -237,7 +237,8 @@ async fn async_main() -> anyhow::Result<()> {
         .route("/tts", post(tts_endpoint))
         .route("/chat", post(chat_endpoint))
         .route("/voice-chat", post(voice_chat_endpoint))
-        .route("/ws/chat/stream", get(chat_stream_ws));
+        .route("/ws/chat/stream", get(chat_stream_ws))
+        .route("/debug/files", get(debug_files_endpoint)); // Temporary debug endpoint
     
     // Metrics endpoints - consider adding authentication in production
     let metrics_api = Router::new()
@@ -1224,4 +1225,19 @@ fn clean_text_for_tts(text: &str) -> String {
     } else {
         cleaned
     }
+}
+
+async fn debug_files_endpoint() -> String {
+    let output = std::process::Command::new("find")
+        .arg(".")
+        .arg("-maxdepth")
+        .arg("3")
+        .arg("-not")
+        .arg("-path")
+        .arg("*/.*")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_else(|e| format!("Error listing files: {}", e));
+    
+    format!("Current Dir: {:?}\n\nFiles:\n{}", std::env::current_dir(), output)
 }
