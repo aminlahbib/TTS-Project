@@ -1,0 +1,7 @@
+# Vercel Ignore
+models/
+target/
+.git/
+.cargo/
+performance_results/
+*.pdf

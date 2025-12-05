@@ -12,14 +12,14 @@ function getApiBase() {
             // Fallback for server-side rendering or testing
             return 'http://localhost:8085';
         }
-        
+
         const hostname = window.location.hostname;
         const protocol = window.location.protocol;
         const port = window.location.port;
-        
+
         // Backend API port (different from frontend port)
         const API_PORT = '8085';
-        
+
         // Debug logging
         console.log('[Config] Determining API base URL:', {
             hostname,
@@ -27,30 +27,34 @@ function getApiBase() {
             port,
             fullLocation: window.location.href
         });
-        
+
         // Check if we're accessing via Docker (common Docker hostnames)
         // In Docker, frontend and backend are on same host but different ports
-        const isDocker = hostname === 'localhost' || 
-                         hostname === '127.0.0.1' || 
-                         hostname === '' ||
-                         hostname.includes('.local') ||
-                         port === '8082'; // Frontend nginx port
-        
+        const isDocker = hostname === 'localhost' ||
+            hostname === '127.0.0.1' ||
+            hostname === '' ||
+            hostname.includes('.local') ||
+            port === '8082'; // Frontend nginx port
+
         let apiBase;
-        if (isDocker) {
+        if (window.TTS_API_URL) {
+            // Production: Use explicitly injected URL
+            apiBase = window.TTS_API_URL;
+        } else if (isDocker) {
             // Development/Docker: backend is on same host, different port
             apiBase = `${protocol}//${hostname}:${API_PORT}`;
         } else {
-            // Production: use same protocol and hostname, but backend port (8085)
+            // Production fallback: use same protocol and hostname, but backend port (8085)
+            // This might need to be adjusted if backend is on a completely different domain in prod and not injected
             apiBase = `${protocol}//${hostname}:${API_PORT}`;
         }
-        
+
         // Validate the URL
         if (!apiBase || apiBase.includes('undefined') || apiBase.includes('null')) {
             console.error('[Config] Invalid API base URL computed:', apiBase);
             return 'http://localhost:8085'; // Fallback
         }
-        
+
         console.log('[Config] API Base URL:', apiBase);
         return apiBase;
     } catch (error) {
@@ -116,7 +120,7 @@ export const CONFIG = {
     // API Configuration (lazy getters)
     get API_BASE() { return getApiBaseLazy(); },
     get WS_BASE() { return getWebSocketBaseLazy(); },
-    
+
     // VAD Configuration
     VAD: {
         ENABLED: true,
@@ -125,7 +129,7 @@ export const CONFIG = {
         CHECK_INTERVAL: 100, // How often to check audio levels (ms)
         MIN_RECORDING_DURATION: 500, // Minimum recording duration before VAD can trigger (ms)
     },
-    
+
     // Audio Configuration
     AUDIO: {
         DEFAULT_SPEED: 1.0,
@@ -133,7 +137,7 @@ export const CONFIG = {
         MAX_SPEED: 2.0,
         SPEED_STEP: 0.25,
     },
-    
+
     // Request Configuration
     REQUEST: {
         RETRY_ATTEMPTS: 3,
@@ -142,7 +146,7 @@ export const CONFIG = {
         LLM_TIMEOUT: 180000, // 3 minutes for LLM
         TTS_TIMEOUT: 120000, // 2 minutes for TTS
     },
-    
+
     // UI Configuration
     UI: {
         TOAST_DURATION: 5000, // ms
