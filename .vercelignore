@@ -5,3 +5,6 @@ target/
 .cargo/
 performance_results/
 *.pdf
+.idea
+Dockerfile
+serve_frontend.py
